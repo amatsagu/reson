@@ -357,74 +357,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Seeds initial feed and continue items matching the design mockup.
+     * Fresh startup state: both continue listening and recommended feeds start empty
+     * until the user searches, follows channels, or plays content.
      */
     private fun loadDefaultContent() {
-        val continueList = listOf(
-            Video(
-                id = "mock_c1",
-                title = "Reson\nVideo 5",
-                channelTitle = "Channel Reson",
-                durationText = "45m",
-                durationSeconds = 2700,
-                releaseDateText = "57m ago",
-                playbackProgress = 0.65f
-            ),
-            Video(
-                id = "mock_c2",
-                title = "Reson\nVideo 4",
-                channelTitle = "Channel Reson",
-                durationText = "45m",
-                durationSeconds = 2700,
-                releaseDateText = "1d3h ago",
-                playbackProgress = 0.35f
-            )
-        )
-
-        val feedList = listOf(
-            Video(
-                id = "mock_e5",
-                title = "Reson\nVideo 5",
-                channelTitle = "Channel Reson",
-                durationText = "45m",
-                durationSeconds = 2700,
-                releaseDateText = "57m ago",
-                isDownloaded = false
-            ),
-            Video(
-                id = "mock_e4",
-                title = "Reson\nVideo 5",
-                channelTitle = "Channel Reson",
-                durationText = "45m",
-                durationSeconds = 2700,
-                releaseDateText = "1d3h ago",
-                downloadProgress = 0.75f
-            ),
-            Video(
-                id = "mock_e3",
-                title = "Reson\nVideo • 3",
-                channelTitle = "Channel Reson",
-                durationText = "45m",
-                durationSeconds = 2700,
-                releaseDateText = "3d ago",
-                isDownloaded = false
-            ),
-            Video(
-                id = "mock_e2",
-                title = "Reson\nVideo 2",
-                channelTitle = "Channel Reson",
-                durationText = "52m",
-                durationSeconds = 3120,
-                releaseDateText = "1w2d ago",
-                isDownloaded = true
-            )
-        )
-
         _uiState.update {
             it.copy(
-                continueVideos = continueList,
-                feedVideos = feedList,
-                currentPlayingVideo = continueList.first()
+                continueVideos = emptyList(),
+                feedVideos = emptyList(),
+                currentPlayingVideo = null,
             )
         }
     }

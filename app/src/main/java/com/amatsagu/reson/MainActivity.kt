@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,19 +17,27 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -160,50 +169,129 @@ fun FeedScreen(
     onDownloadVideo: (Video) -> Unit,
     contentPadding: PaddingValues,
 ) {
-    LazyColumn(
+    val hasContent = uiState.continueVideos.isNotEmpty() || uiState.feedVideos.isNotEmpty()
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(contentPadding),
-        contentPadding = PaddingValues(vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(contentPadding)
     ) {
-        item(key = "search_bar", contentType = "search") {
-            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                SearchPillBar(
-                    query = "",
-                    onClick = onSearchClick
-                )
-            }
-        }
-
-        item(key = "continue_section", contentType = "continue") {
-            ContinueSection(
-                videos = uiState.continueVideos,
-                onPlayClick = onPlayVideo
+        // Search bar pill stays pinned at the top
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            SearchPillBar(
+                query = "",
+                onClick = onSearchClick
             )
         }
 
-        item(key = "recommended_header", contentType = "header") {
-            AdaptiveSectionHeader(
-                fullTitle = stringResource(R.string.section_recommended_content),
-                shortTitle = stringResource(R.string.section_recommended_short),
-                modifier = Modifier.padding(horizontal = 16.dp)
+        if (!hasContent) {
+            // Friendly centered empty state encouraging user to search
+            EmptyFeedState(
+                onSearchClick = onSearchClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 32.dp)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (uiState.continueVideos.isNotEmpty()) {
+                    item(key = "continue_section", contentType = "continue") {
+                        ContinueSection(
+                            videos = uiState.continueVideos,
+                            onPlayClick = onPlayVideo
+                        )
+                    }
+                }
+
+                if (uiState.feedVideos.isNotEmpty()) {
+                    item(key = "recommended_header", contentType = "header") {
+                        AdaptiveSectionHeader(
+                            fullTitle = stringResource(R.string.section_recommended_content),
+                            shortTitle = stringResource(R.string.section_recommended_short),
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+
+                    items(
+                        items = uiState.feedVideos,
+                        key = { it.id },
+                        contentType = { "feed_video" }
+                    ) { video ->
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            VideoItem(
+                                video = video,
+                                onPlayClick = { onPlayVideo(video) },
+                                onDownloadClick = { onDownloadVideo(video) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Friendly empty state displayed when neither continue watching nor recommended items are present.
+ * Encourages the user to start searching and discovering content.
+ */
+@Composable
+fun EmptyFeedState(
+    onSearchClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable(onClick = onSearchClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.TravelExplore,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(42.dp)
             )
         }
 
-        items(
-            items = uiState.feedVideos,
-            key = { it.id },
-            contentType = { "feed_video" }
-        ) { video ->
-            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                VideoItem(
-                    video = video,
-                    onPlayClick = { onPlayVideo(video) },
-                    onDownloadClick = { onDownloadVideo(video) }
-                )
-            }
-        }
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = stringResource(R.string.feed_empty_title),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = stringResource(R.string.feed_empty_description),
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
     }
 }
 
@@ -319,9 +407,32 @@ fun LibraryScreen(
     }
 }
 
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true)
+@androidx.compose.ui.tooling.preview.Preview(name = "Empty Feed (Fresh Start)", showBackground = true)
 @Composable
-fun ResonFeedPreview() {
+fun ResonFeedEmptyPreview() {
+    ResonTheme(dynamicColor = true) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            FeedScreen(
+                uiState = MainUiState(
+                    continueVideos = emptyList(),
+                    feedVideos = emptyList()
+                ),
+                onSearchClick = {},
+                onPlayVideo = {},
+                onDownloadVideo = {},
+                contentPadding = PaddingValues(0.dp)
+            )
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "Populated Feed", showBackground = true)
+@Composable
+fun ResonFeedWithContentPreview() {
     ResonTheme(dynamicColor = true) {
         Box(
             modifier = Modifier
@@ -333,45 +444,45 @@ fun ResonFeedPreview() {
                     continueVideos = listOf(
                         Video(
                             id = "c1",
-                            title = "Reson\nVideo 5",
-                            channelTitle = "Channel Reson",
+                            title = "Designing the Future of Mobile Audio",
+                            channelTitle = "Reson Studio",
                             durationText = "45m",
                             releaseDateText = "57m ago",
-                            playbackProgress = 0.65f
+                            playbackProgress = 0.65f,
                         ),
                         Video(
                             id = "c2",
-                            title = "Reson\nVideo 4",
-                            channelTitle = "Channel Reson",
-                            durationText = "45m",
+                            title = "Why Clean Architecture Actually Matters",
+                            channelTitle = "Software Crafts",
+                            durationText = "38m",
                             releaseDateText = "1d3h ago",
-                            playbackProgress = 0.35f
-                        )
+                            playbackProgress = 0.35f,
+                        ),
                     ),
                     feedVideos = listOf(
                         Video(
-                            id = "e5",
-                            title = "Reson\nVideo 5",
-                            channelTitle = "Channel Reson",
-                            durationText = "45m",
-                            releaseDateText = "57m ago"
+                            id = "e1",
+                            title = "Deep Dive into Local AI & Neural Engines",
+                            channelTitle = "Latent Space",
+                            durationText = "42m",
+                            releaseDateText = "2d ago",
                         ),
                         Video(
-                            id = "e5_2",
-                            title = "Reson\nVideo 5",
-                            channelTitle = "Channel Reson",
-                            durationText = "45m",
-                            releaseDateText = "1d3h ago",
-                            downloadProgress = 0.75f
+                            id = "e2",
+                            title = "Building Reson: The Journey to Offline Audio",
+                            channelTitle = "Reson Engineering",
+                            durationText = "34m",
+                            releaseDateText = "4d ago",
+                            downloadProgress = 0.75f,
                         ),
                         Video(
                             id = "e3",
-                            title = "Reson\nVideo • 3",
-                            channelTitle = "Channel Reson",
-                            durationText = "45m",
-                            releaseDateText = "3d ago"
-                        )
-                    )
+                            title = "The Architecture of Modern Kotlin & Compose",
+                            channelTitle = "Android Developers",
+                            durationText = "28m",
+                            releaseDateText = "1w ago",
+                        ),
+                    ),
                 ),
                 onSearchClick = {},
                 onPlayVideo = {},

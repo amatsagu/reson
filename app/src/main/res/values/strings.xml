@@ -38,6 +38,10 @@
     <string name="search_empty_hint">Search videos, channels or paste links</string>
     <string name="search_failed">Search failed: %1$s</string>
 
+    <!-- Feed Empty State -->
+    <string name="feed_empty_title">Discover your next listen</string>
+    <string name="feed_empty_description">Search for channels, topics, or videos above to start curating your personal feed.</string>
+
     <!-- App Startup & Loading Status -->
     <string name="loading_starting_engine">Starting up…</string>
     <string name="loading_connecting_engine">Connecting…</string>
