@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -24,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,22 +57,27 @@ fun EpisodeItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 16:9 Standard YouTube Aspect Ratio Video Thumbnail
-        Box(
-            modifier = Modifier
-                .height(54.dp)
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-            contentAlignment = Alignment.Center
-        ) {
-            if (episode.thumbnailUrl.isNotBlank()) {
-                AsyncImage(
-                    model = episode.thumbnailUrl,
-                    contentDescription = episode.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
+        // Flattened: Directly modifier-styled AsyncImage eliminates redundant wrapper Box layout nodes
+        if (episode.thumbnailUrl.isNotBlank()) {
+            AsyncImage(
+                model = episode.thumbnailUrl,
+                contentDescription = episode.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .height(54.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .height(54.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
                     text = stringResource(R.string.app_name),
                     fontSize = 12.sp,
@@ -100,15 +105,18 @@ fun EpisodeItem(
                 lineHeight = 20.sp
             )
 
-            val metadata = buildString {
-                append(episode.channelTitle)
-                if (episode.durationText.isNotBlank()) {
-                    append(" · ")
-                    append(episode.durationText)
-                }
-                if (episode.releaseDateText.isNotBlank()) {
-                    append("\n")
-                    append(episode.releaseDateText)
+            // Cache formatted metadata to eliminate per-frame allocations during scrolling
+            val metadata = remember(episode.channelTitle, episode.durationText, episode.releaseDateText) {
+                buildString {
+                    append(episode.channelTitle)
+                    if (episode.durationText.isNotBlank()) {
+                        append(" · ")
+                        append(episode.durationText)
+                    }
+                    if (episode.releaseDateText.isNotBlank()) {
+                        append("\n")
+                        append(episode.releaseDateText)
+                    }
                 }
             }
 

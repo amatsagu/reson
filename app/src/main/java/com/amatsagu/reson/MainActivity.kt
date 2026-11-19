@@ -195,7 +195,11 @@ fun FeedScreen(
         }
 
         // Vertical episodes list
-        items(uiState.feedEpisodes, key = { it.id }) { episode ->
+        items(
+            items = uiState.feedEpisodes,
+            key = { it.id },
+            contentType = { "feed_episode" }
+        ) { episode ->
             Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                 EpisodeItem(
                     episode = episode,
@@ -220,7 +224,7 @@ fun ChannelsScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
+        item(key = "channels_title", contentType = "header") {
             Text(
                 text = stringResource(R.string.channels_title),
                 fontSize = 22.sp,
@@ -230,7 +234,7 @@ fun ChannelsScreen(
         }
 
         if (followedChannels.isEmpty()) {
-            item {
+            item(key = "channels_empty", contentType = "empty_state") {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = stringResource(R.string.channels_empty_description),
@@ -240,7 +244,11 @@ fun ChannelsScreen(
                 )
             }
         } else {
-            items(followedChannels, key = { it.id }) { channel ->
+            items(
+                items = followedChannels,
+                key = { it.id },
+                contentType = { "channel" }
+            ) { channel ->
                 ChannelItem(
                     channel = channel,
                     onFollowClick = { onFollowClick(channel) }

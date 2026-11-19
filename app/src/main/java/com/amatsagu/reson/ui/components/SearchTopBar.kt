@@ -301,7 +301,7 @@ fun SearchOverlay(
                             contentPadding = PaddingValues(vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            item {
+                            item(key = "results_count", contentType = "header") {
                                 Text(
                                     text = stringResource(R.string.search_results_count, searchResults.size),
                                     fontSize = 13.sp,
@@ -311,7 +311,16 @@ fun SearchOverlay(
                                 )
                             }
 
-                            items(searchResults, key = { it.id }) { item ->
+                            items(
+                                items = searchResults,
+                                key = { it.id },
+                                contentType = { item ->
+                                    when (item) {
+                                        is SearchResultItem.Video -> "video"
+                                        is SearchResultItem.Creator -> "creator"
+                                    }
+                                }
+                            ) { item ->
                                 when (item) {
                                     is SearchResultItem.Video -> {
                                         EpisodeItem(
@@ -337,7 +346,11 @@ fun SearchOverlay(
                         LazyColumn(
                             contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
-                            items(suggestions) { suggestion ->
+                            items(
+                                items = suggestions,
+                                key = { it },
+                                contentType = { "suggestion" }
+                            ) { suggestion ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()

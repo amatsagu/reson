@@ -62,7 +62,11 @@ fun ContinueSection(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(episodes, key = { it.id }) { episode ->
+            items(
+                items = episodes,
+                key = { it.id },
+                contentType = { "continue_episode" }
+            ) { episode ->
                 ContinueCard(
                     episode = episode,
                     onPlayClick = { onPlayClick(episode) }
@@ -93,21 +97,24 @@ fun ContinueCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Left artwork
-            Box(
-                modifier = Modifier
-                    .size(68.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) {
-                if (episode.thumbnailUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = episode.thumbnailUrl,
-                        contentDescription = episode.title,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
+            if (episode.thumbnailUrl.isNotBlank()) {
+                AsyncImage(
+                    model = episode.thumbnailUrl,
+                    contentDescription = episode.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
                         text = stringResource(R.string.app_name),
                         fontSize = 12.sp,
