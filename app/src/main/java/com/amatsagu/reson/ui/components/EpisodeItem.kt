@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -54,11 +56,12 @@ fun EpisodeItem(
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Thumbnail
+        // 16:9 Standard YouTube Aspect Ratio Video Thumbnail
         Box(
             modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .height(54.dp)
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center
         ) {
@@ -66,7 +69,7 @@ fun EpisodeItem(
                 AsyncImage(
                     model = episode.thumbnailUrl,
                     contentDescription = episode.title,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
             } else {
@@ -97,25 +100,27 @@ fun EpisodeItem(
                 lineHeight = 20.sp
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            val subtitle = buildString {
+            val metadata = buildString {
                 append(episode.channelTitle)
                 if (episode.durationText.isNotBlank()) {
                     append(" · ")
                     append(episode.durationText)
                 }
                 if (episode.releaseDateText.isNotBlank()) {
-                    append(" · ")
+                    append("\n")
                     append(episode.releaseDateText)
                 }
             }
 
+            Spacer(modifier = Modifier.height(3.dp))
+
+            // Channel info & relative upload date unified as 1 compact component with tight line height
             Text(
-                text = subtitle,
-                fontSize = 13.sp,
+                text = metadata,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
         }

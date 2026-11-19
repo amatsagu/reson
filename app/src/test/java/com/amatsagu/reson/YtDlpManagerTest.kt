@@ -124,4 +124,47 @@ class YtDlpManagerTest {
         assertEquals("462.0k subscribers", YtDlpManager.formatSubscriberCount(462_000))
         assertEquals("500 subscribers", YtDlpManager.formatSubscriberCount(500))
     }
+
+    @Test
+    fun testIsHandleExactMatch() {
+        assertTrue(YtDlpManager.isHandleExactMatch("SmugAlana", "@SmugAlana"))
+        assertTrue(YtDlpManager.isHandleExactMatch("@SmugAlana", "@SmugAlana"))
+        assertTrue(YtDlpManager.isHandleExactMatch("smugalana", "@SmugAlana"))
+        assertTrue(YtDlpManager.isHandleExactMatch("SmugVODs", "@SmugVODs"))
+        org.junit.Assert.assertFalse(YtDlpManager.isHandleExactMatch("smug alana", "@SmugAlana"))
+        org.junit.Assert.assertFalse(YtDlpManager.isHandleExactMatch("smug", "@SmugAlana"))
+    }
+
+    @Test
+    fun testFilterAndRankChannels_skipsUnder1000SubsUnlessExactHandle() {
+        val channels = listOf(
+            com.amatsagu.reson.model.Channel(
+                id = "c1",
+                title = "SmugAlana",
+                handle = "@SmugAlana",
+                subscriberCount = 555_000
+            ),
+            com.amatsagu.reson.model.Channel(
+                id = "c2_small",
+                title = "Smug Small Fan",
+                handle = "@SmugSmallFan",
+                subscriberCount = 450 // < 1000 subs
+            ),
+            com.amatsagu.reson.model.Channel(
+                id = "c3_exact_small",
+                title = "Smug VODs",
+                handle = "@SmugVODs",
+                subscriberCount = 800 // < 1000 subs, but exact handle match when querying "@SmugVODs"
+            )
+        )
+
+        // Query "smug alana" -> c1 (555k) included; c2_small (<1000 and not exact handle) excluded
+        val resultsForGeneral = YtDlpManager.filterAndRankChannels("smug alana", channels, emptyList())
+        assertEquals(1, resultsForGeneral.size)
+        assertEquals("c1", resultsForGeneral[0].id)
+
+        // Query "SmugVODs" -> matches @SmugVODs handle perfectly, so c3_exact_small is allowed despite < 1000 subs
+        val resultsForExactHandle = YtDlpManager.filterAndRankChannels("SmugVODs", channels, emptyList())
+        assertTrue(resultsForExactHandle.any { it.id == "c3_exact_small" })
+    }
 }

@@ -188,8 +188,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         /**
+         * Checks if the search query matches the channel handle perfectly (with or without '@' prefix).
+         */
+        fun isHandleExactMatch(query: String, handle: String): Boolean {
+            val q = query.trim().lowercase().removePrefix("@")
+            val h = handle.trim().lowercase().removePrefix("@")
+            return q.isNotEmpty() && q == h
+        }
+
+        /**
          * Filters out random channels with low similarity (< 0.45), and sorts matching channels
          * by similarity score, subscriber count, and whether they have active recent videos.
+         * Channels with less than 1,000 subscribers are skipped unless their @handle matches the query perfectly (with or without '@').
          */
         fun filterAndRankChannels(
             query: String,
@@ -197,6 +207,12 @@ class YtDlpManager private constructor(private val appContext: Context) {
             videos: List<Episode>
         ): List<Channel> {
             val scored = channels.mapNotNull { ch ->
+                // Channels with < 1000 subscribers are skipped unless their real @handle matches the query perfectly
+                val isExactHandle = isHandleExactMatch(query, ch.handle)
+                if (ch.subscriberCount < 1000 && !isExactHandle) {
+                    return@mapNotNull null
+                }
+
                 val similarity = calculateSimilarity(query, ch.title, ch.handle)
                 // Filter out unrelated channels (YouTube channel search result must have at least 0.45 similarity)
                 if (similarity < 0.45) return@mapNotNull null
