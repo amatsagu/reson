@@ -22,6 +22,35 @@ data class Episode(
 )
 
 /**
+ * Representation of a creator / YouTube channel.
+ */
+data class Channel(
+    val id: String,
+    val title: String,
+    val handle: String = "",
+    val avatarUrl: String = "",
+    val subscriberCount: Long = 0L,
+    val subscriberCountText: String = "",
+    val isFollowed: Boolean = false,
+    val lastVideoReleaseSec: Long = 0L
+)
+
+/**
+ * Union type for heterogeneous search results (videos and followable creators).
+ */
+sealed interface SearchResultItem {
+    val id: String
+
+    data class Video(val episode: Episode) : SearchResultItem {
+        override val id: String get() = "video_${episode.id}"
+    }
+
+    data class Creator(val channel: Channel) : SearchResultItem {
+        override val id: String get() = "channel_${channel.id}"
+    }
+}
+
+/**
  * Bottom navigation destinations with localized string resource IDs.
  */
 enum class ResonTab(@StringRes val titleRes: Int) {

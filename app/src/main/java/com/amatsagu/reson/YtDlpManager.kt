@@ -10,6 +10,9 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.YoutubeDLResponse
 import com.yausername.youtubedl_android.mapper.VideoInfo
 import com.yausername.ffmpeg.FFmpeg
+import com.amatsagu.reson.model.Channel
+import com.amatsagu.reson.model.Episode
+import com.amatsagu.reson.model.SearchResultItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +21,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.URLEncoder
+import java.util.Locale
+import kotlin.math.log10
 
 /**
  * State representing the lifecycle and health of yt-dlp.
@@ -121,6 +127,143 @@ class YtDlpManager private constructor(private val appContext: Context) {
             val y = days / 365
             val remMo = (days % 365) / 30
             return if (remMo > 0 && y < 3) "${y}y${remMo}mo ago" else "${y}y ago"
+        }
+
+        fun formatSubscriberCount(count: Long): String {
+            if (count <= 0) return ""
+            return when {
+                count >= 1_000_000 -> {
+                    val m = count / 1_000_000.0
+                    String.format(Locale.US, "%.1fM subscribers", m)
+                }
+                count >= 1_000 -> {
+                    val k = count / 1_000.0
+                    String.format(Locale.US, "%.1fk subscribers", k)
+                }
+                count == 1L -> "1 subscriber"
+                else -> "$count subscribers"
+            }
+        }
+
+        /**
+         * Computes similarity between search query and channel name/handle (0.0 to 1.0).
+         * Normalizes alphanumeric text (ignoring spaces, case, and punctuation) to match YouTube's behavior,
+         * so queries like "smug alana" match "SmugAlana", "mr beast" matches "MrBeast", etc.
+         */
+        fun calculateSimilarity(query: String, title: String, handle: String): Double {
+            val qNorm = query.lowercase().filter { it.isLetterOrDigit() }
+            val tNorm = title.lowercase().filter { it.isLetterOrDigit() }
+            val hNorm = handle.lowercase().removePrefix("@").filter { it.isLetterOrDigit() }
+
+            if (qNorm.isEmpty() || tNorm.isEmpty()) return 0.0
+
+            // 1. Exact alphanumeric match (e.g. "smug alana" == "smugalana" == "SmugAlana")
+            if (qNorm == tNorm || (hNorm.isNotEmpty() && qNorm == hNorm)) return 1.0
+
+            // 2. Prefix match on normalized text (e.g. "smug" matches "SmugAlana")
+            if (tNorm.startsWith(qNorm) || (hNorm.isNotEmpty() && hNorm.startsWith(qNorm)) || qNorm.startsWith(tNorm)) {
+                return 0.92
+            }
+
+            // 3. Substring containment on normalized text (e.g. "alana" matches "SmugAlana")
+            if (tNorm.contains(qNorm) || (hNorm.isNotEmpty() && hNorm.contains(qNorm)) || qNorm.contains(tNorm)) {
+                return 0.85
+            }
+
+            // 4. Word overlap with camelCase support (e.g. "SmugAlana" -> ["smug", "alana"])
+            val titleExpanded = title.replace("(?<=[a-z])(?=[A-Z])".toRegex(), " ")
+            val handleExpanded = handle.replace("(?<=[a-z])(?=[A-Z])".toRegex(), " ")
+            val qWords = query.lowercase().split("[^a-zA-Z0-9]+".toRegex()).filter { it.isNotEmpty() }.toSet()
+            val tWords = "$titleExpanded $handleExpanded".lowercase().split("[^a-zA-Z0-9]+".toRegex()).filter { it.isNotEmpty() }.toSet()
+
+            if (qWords.isNotEmpty() && tWords.isNotEmpty()) {
+                val intersection = qWords.intersect(tWords).size
+                val overlap = intersection.toDouble() / qWords.size
+                if (overlap >= 0.4) {
+                    return 0.65 + (0.3 * overlap)
+                }
+            }
+
+            return 0.0
+        }
+
+        /**
+         * Filters out random channels with low similarity (< 0.45), and sorts matching channels
+         * by similarity score, subscriber count, and whether they have active recent videos.
+         */
+        fun filterAndRankChannels(
+            query: String,
+            channels: List<Channel>,
+            videos: List<Episode>
+        ): List<Channel> {
+            val scored = channels.mapNotNull { ch ->
+                val similarity = calculateSimilarity(query, ch.title, ch.handle)
+                // Filter out unrelated channels (YouTube channel search result must have at least 0.45 similarity)
+                if (similarity < 0.45) return@mapNotNull null
+
+                // Check if this channel has any video present in the search results
+                val matchingVideo = videos.firstOrNull { v ->
+                    v.channelTitle.equals(ch.title, ignoreCase = true) ||
+                            (ch.handle.isNotBlank() && v.channelTitle.contains(ch.handle.removePrefix("@"), ignoreCase = true))
+                }
+
+                val hasRecentVideo = matchingVideo != null
+                val subScore = log10(ch.subscriberCount.coerceAtLeast(100L).toDouble())
+                val totalScore = (similarity * 10.0) + subScore + (if (hasRecentVideo) 3.0 else 0.0)
+
+                ch to totalScore
+            }
+
+            return scored.sortedByDescending { it.second }.map { it.first }
+        }
+
+        /**
+         * Combines videos and channels into a single unified search list up to maxTotal (default 30).
+         * Places top channel high on the list (positions 1 and 4, within top 5).
+         * Each channel counts towards the maxTotal limit.
+         */
+        fun mergeSearchResults(
+            videos: List<Episode>,
+            channels: List<Channel>,
+            maxTotal: Int = 30
+        ): List<SearchResultItem> {
+            val result = mutableListOf<SearchResultItem>()
+            val videoIter = videos.iterator()
+            val channelIter = channels.iterator()
+
+            // 1. Put top video at position 0 (if available)
+            if (videoIter.hasNext()) {
+                result.add(SearchResultItem.Video(videoIter.next()))
+            }
+
+            // 2. Put #1 channel at position 1 (high in top 5)
+            if (channelIter.hasNext() && result.size < maxTotal) {
+                result.add(SearchResultItem.Creator(channelIter.next()))
+            }
+
+            // 3. Add next 2 videos (positions 2 and 3)
+            var videoCount = 0
+            while (videoIter.hasNext() && videoCount < 2 && result.size < maxTotal) {
+                result.add(SearchResultItem.Video(videoIter.next()))
+                videoCount++
+            }
+
+            // 4. Put #2 channel at position 4 (high in top 5, if present)
+            if (channelIter.hasNext() && result.size < maxTotal) {
+                result.add(SearchResultItem.Creator(channelIter.next()))
+            }
+
+            // 5. Fill remaining slots with videos up to maxTotal
+            while (videoIter.hasNext() && result.size < maxTotal) {
+                result.add(SearchResultItem.Video(videoIter.next()))
+            }
+
+            // 6. If more channels and space remains (e.g. fewer videos)
+            while (channelIter.hasNext() && result.size < maxTotal) {
+                result.add(SearchResultItem.Creator(channelIter.next()))
+            }
+
+            return result
         }
     }
 
@@ -364,6 +507,86 @@ class YtDlpManager private constructor(private val appContext: Context) {
         } catch (e: Throwable) {
             Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
             Result.Failure(e, e.message ?: "Failed to perform search")
+        }
+    }
+
+    /**
+     * Searches YouTube channels for the query using the type=channel filter (sp=EgIQAg%3D%3D).
+     */
+    suspend fun searchChannels(
+        query: String,
+        maxResults: Int = 3
+    ): Result<List<Channel>> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
+
+        try {
+            ensureReady()
+            val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
+            val channelSearchUrl = "https://www.youtube.com/results?search_query=$encodedQuery&sp=EgIQAg%3D%3D"
+
+            val request = YoutubeDLRequest(channelSearchUrl).apply {
+                addOption("--flat-playlist")
+                addOption("--dump-json")
+                addOption("--skip-download")
+                addOption("--no-warnings")
+                addOption("--playlist-end", maxResults.toString())
+            }
+
+            Log.i(TAG, "Searching channels for '$trimmed'")
+            val response = YoutubeDL.getInstance().execute(request)
+            val channels = mutableListOf<Channel>()
+
+            for (line in response.out.lines()) {
+                val jsonLine = line.trim()
+                if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
+                try {
+                    val json = org.json.JSONObject(jsonLine)
+                    val id = json.optString("id", "").ifEmpty {
+                        json.optString("channel_id", "")
+                    }
+                    if (id.isEmpty()) continue
+
+                    val title = json.optString("title", "").ifEmpty {
+                        json.optString("channel", "")
+                    }
+                    if (title.isEmpty()) continue
+
+                    val handle = json.optString("uploader_id", "").ifEmpty {
+                        json.optString("uploader", "")
+                    }
+                    val subs = json.optLong("channel_follower_count", 0L)
+                    val subsText = formatSubscriberCount(subs)
+
+                    var avatar = ""
+                    val thumbs = json.optJSONArray("thumbnails")
+                    if (thumbs != null && thumbs.length() > 0) {
+                        val lastThumb = thumbs.getJSONObject(thumbs.length() - 1)
+                        avatar = lastThumb.optString("url", "")
+                    }
+                    if (avatar.startsWith("//")) {
+                        avatar = "https:$avatar"
+                    }
+
+                    channels.add(
+                        Channel(
+                            id = id,
+                            title = title,
+                            handle = handle,
+                            avatarUrl = avatar,
+                            subscriberCount = subs,
+                            subscriberCountText = subsText
+                        )
+                    )
+                } catch (e: Exception) {
+                    Log.d(TAG, "Skipping channel parse error: ${e.message}")
+                }
+            }
+
+            Result.Success(channels)
+        } catch (e: Throwable) {
+            Log.w(TAG, "Channel search encountered error: ${e.message}")
+            Result.Success(emptyList()) // Non-fatal, gracefully fall back to video results
         }
     }
 

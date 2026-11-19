@@ -54,4 +54,74 @@ class YtDlpManagerTest {
         assertEquals("2mo ago", YtDlpManager.formatRelativeSeconds(65 * 86400))
         assertEquals("4y ago", YtDlpManager.formatRelativeSeconds(4 * 365 * 86400))
     }
+
+    @Test
+    fun testCalculateSimilarity_accurateFiltering() {
+        val fireshipSim = YtDlpManager.calculateSimilarity("fireship", "Fireship", "@Fireship")
+        assertTrue("Expected fireship similarity to be >= 0.95, got $fireshipSim", fireshipSim >= 0.95)
+
+        // Verifies normalized matching matches YouTube's behavior (ignoring spaces / case)
+        val smugAlanaWithSpace = YtDlpManager.calculateSimilarity("smug alana", "SmugAlana", "@SmugAlana")
+        assertEquals(1.0, smugAlanaWithSpace, 0.001)
+
+        val smugAlanaExact = YtDlpManager.calculateSimilarity("SmugAlana", "SmugAlana", "@SmugAlana")
+        assertEquals(1.0, smugAlanaExact, 0.001)
+
+        val mrBeastWithSpace = YtDlpManager.calculateSimilarity("mr beast", "MrBeast", "@MrBeast")
+        assertEquals(1.0, mrBeastWithSpace, 0.001)
+
+        val mkbhdSim = YtDlpManager.calculateSimilarity("mkbhd", "Marques Brownlee", "@mkbhd")
+        assertTrue("Expected mkbhd handle similarity to be >= 0.95, got $mkbhdSim", mkbhdSim >= 0.95)
+
+        val unrelatedSim = YtDlpManager.calculateSimilarity("how to make pasta", "Pasta Chef", "@pastachef")
+        assertTrue("Expected unrelated channel to have similarity < 0.45, got $unrelatedSim", unrelatedSim < 0.45)
+    }
+
+    @Test
+    fun testMergeSearchResults_channelHighInTop5AndCapsAt30() {
+        val videos = (1..35).map {
+            com.amatsagu.reson.model.Episode(
+                id = "v$it",
+                title = "Video $it",
+                channelTitle = "Test Channel",
+                durationText = "10m"
+            )
+        }
+        val channels = listOf(
+            com.amatsagu.reson.model.Channel(
+                id = "ch1",
+                title = "Channel 1",
+                subscriberCount = 1_000_000
+            ),
+            com.amatsagu.reson.model.Channel(
+                id = "ch2",
+                title = "Channel 2",
+                subscriberCount = 500_000
+            )
+        )
+
+        val merged = YtDlpManager.mergeSearchResults(videos, channels, maxTotal = 30)
+
+        // Must count toward 30 limit exactly
+        assertEquals(30, merged.size)
+
+        // Item 0 is Video 1
+        assertTrue(merged[0] is com.amatsagu.reson.model.SearchResultItem.Video)
+        assertEquals("video_v1", merged[0].id)
+
+        // Item 1 is Channel 1 (in top 5)
+        assertTrue(merged[1] is com.amatsagu.reson.model.SearchResultItem.Creator)
+        assertEquals("channel_ch1", merged[1].id)
+
+        // Item 4 is Channel 2 (in top 5)
+        assertTrue(merged[4] is com.amatsagu.reson.model.SearchResultItem.Creator)
+        assertEquals("channel_ch2", merged[4].id)
+    }
+
+    @Test
+    fun testFormatSubscriberCount() {
+        assertEquals("4.3M subscribers", YtDlpManager.formatSubscriberCount(4_340_000))
+        assertEquals("462.0k subscribers", YtDlpManager.formatSubscriberCount(462_000))
+        assertEquals("500 subscribers", YtDlpManager.formatSubscriberCount(500))
+    }
 }

@@ -54,7 +54,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amatsagu.reson.R
+import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.Episode
+import com.amatsagu.reson.model.SearchResultItem
 import kotlinx.coroutines.delay
 
 /**
@@ -117,11 +119,12 @@ fun SearchOverlay(
     onDismiss: () -> Unit,
     suggestions: List<String>,
     isSearching: Boolean,
-    searchResults: List<Episode>,
+    searchResults: List<SearchResultItem>,
     @androidx.annotation.StringRes errorRes: Int? = null,
     errorArg: String? = null,
     onPlayEpisode: (Episode) -> Unit,
     onDownloadEpisode: (Episode) -> Unit,
+    onFollowChannel: (Channel) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -308,12 +311,23 @@ fun SearchOverlay(
                                 )
                             }
 
-                            items(searchResults, key = { it.id }) { episode ->
-                                EpisodeItem(
-                                    episode = episode,
-                                    onPlayClick = { onPlayEpisode(episode) },
-                                    onDownloadClick = { onDownloadEpisode(episode) }
-                                )
+                            items(searchResults, key = { it.id }) { item ->
+                                when (item) {
+                                    is SearchResultItem.Video -> {
+                                        EpisodeItem(
+                                            episode = item.episode,
+                                            onPlayClick = { onPlayEpisode(item.episode) },
+                                            onDownloadClick = { onDownloadEpisode(item.episode) }
+                                        )
+                                    }
+                                    is SearchResultItem.Creator -> {
+                                        ChannelItem(
+                                            channel = item.channel,
+                                            onFollowClick = { onFollowChannel(item.channel) },
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

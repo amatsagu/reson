@@ -18,6 +18,9 @@
     <string name="action_pause">Pause</string>
     <string name="action_download">Download</string>
     <string name="action_downloaded">Downloaded</string>
+    <string name="action_follow">Follow</string>
+    <string name="action_following">Following</string>
+    <string name="action_unfollow">Unfollow</string>
     <string name="action_check_update">Check Update</string>
     <string name="action_self_repair">Self-Repair</string>
     <string name="action_skip_offline">Continue Offline / Skip</string>

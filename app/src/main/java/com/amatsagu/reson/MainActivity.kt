@@ -32,10 +32,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.ResonTab
 import com.amatsagu.reson.ui.components.AdaptiveSectionHeader
 import com.amatsagu.reson.ui.components.AppLoadingOverlay
+import com.amatsagu.reson.ui.components.ChannelItem
 import com.amatsagu.reson.ui.components.ContinueSection
 import com.amatsagu.reson.ui.components.EpisodeItem
 import com.amatsagu.reson.ui.components.MiniPlayerBar
@@ -102,6 +104,8 @@ fun ResonApp(viewModel: MainViewModel) {
                 }
                 ResonTab.Channels -> {
                     ChannelsScreen(
+                        followedChannels = uiState.followedChannelList,
+                        onFollowClick = { viewModel.toggleFollowChannel(it) },
                         contentPadding = innerPadding
                     )
                 }
@@ -129,7 +133,8 @@ fun ResonApp(viewModel: MainViewModel) {
             errorRes = uiState.searchErrorRes,
             errorArg = uiState.searchErrorArg,
             onPlayEpisode = { viewModel.playEpisode(it) },
-            onDownloadEpisode = { viewModel.downloadEpisode(it) }
+            onDownloadEpisode = { viewModel.downloadEpisode(it) },
+            onFollowChannel = { viewModel.toggleFollowChannel(it) }
         )
 
         // Startup App Loading Overlay with Bypass
@@ -204,29 +209,44 @@ fun FeedScreen(
 
 @Composable
 fun ChannelsScreen(
+    followedChannels: List<Channel>,
+    onFollowClick: (Channel) -> Unit,
     contentPadding: PaddingValues
 ) {
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(contentPadding)
-            .padding(16.dp)
+            .padding(contentPadding),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text(
-            text = stringResource(R.string.channels_title),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        item {
+            Text(
+                text = stringResource(R.string.channels_title),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = stringResource(R.string.channels_empty_description),
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            lineHeight = 20.sp
-        )
+        if (followedChannels.isEmpty()) {
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.channels_empty_description),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 20.sp
+                )
+            }
+        } else {
+            items(followedChannels, key = { it.id }) { channel ->
+                ChannelItem(
+                    channel = channel,
+                    onFollowClick = { onFollowClick(channel) }
+                )
+            }
+        }
     }
 }
 

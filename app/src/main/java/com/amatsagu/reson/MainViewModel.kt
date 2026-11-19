@@ -5,10 +5,13 @@ import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amatsagu.reson.data.SearchSuggestClient
+import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.ResonTab
+import com.amatsagu.reson.model.SearchResultItem
 import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,10 +38,14 @@ data class MainUiState(
     val searchQuery: String = "",
     val isSearchActive: Boolean = false,
     val suggestions: List<String> = emptyList(),
-    val searchResults: List<Episode> = emptyList(),
+    val searchResults: List<SearchResultItem> = emptyList(),
     val isSearching: Boolean = false,
     @StringRes val searchErrorRes: Int? = null,
     val searchErrorArg: String? = null,
+
+    // Channel subscriptions
+    val followedChannels: Set<String> = emptySet(),
+    val followedChannelList: List<Channel> = emptyList(),
 
     // Feed / Home Content
     val continueEpisodes: List<Episode> = emptyList(),
@@ -193,32 +200,95 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        addLog("Executing fast search for: '$trimmed'")
+        addLog("Executing unified search for: '$trimmed'...")
 
         viewModelScope.launch {
-            when (val result = ytDlpManager.searchContent(trimmed, maxResults = 30)) {
+            // Concurrently query related videos and relevant channels
+            val videoDeferred = async { ytDlpManager.searchContent(trimmed, maxResults = 30) }
+            val channelDeferred = async { ytDlpManager.searchChannels(trimmed, maxResults = 3) }
+
+            val videoResult = videoDeferred.await()
+            val channelResult = channelDeferred.await()
+
+            when (videoResult) {
                 is Result.Success -> {
-                    addLog("Search completed. Found ${result.data.size} episodes.")
+                    val rawVideos = videoResult.data
+                    val rawChannels = if (channelResult is Result.Success) channelResult.data else emptyList()
+
+                    // Filter out random channels (similarity < 0.6) and rank by similarity, subs & activity
+                    val filteredChannels = YtDlpManager.filterAndRankChannels(
+                        query = trimmed,
+                        channels = rawChannels,
+                        videos = rawVideos
+                    ).map { ch ->
+                        ch.copy(isFollowed = _uiState.value.followedChannels.contains(ch.id))
+                    }
+
+                    // Assemble composite list up to 30 items with channels placed high (top 5)
+                    val mergedResults = YtDlpManager.mergeSearchResults(
+                        videos = rawVideos,
+                        channels = filteredChannels,
+                        maxTotal = 30
+                    )
+
+                    addLog("Search completed. Found ${rawVideos.size} videos and ${filteredChannels.size} matching channels.")
                     _uiState.update {
                         it.copy(
                             isSearching = false,
-                            searchResults = result.data,
-                            searchErrorRes = if (result.data.isEmpty()) R.string.search_no_results else null,
-                            searchErrorArg = if (result.data.isEmpty()) trimmed else null
+                            searchResults = mergedResults,
+                            searchErrorRes = if (mergedResults.isEmpty()) R.string.search_no_results else null,
+                            searchErrorArg = if (mergedResults.isEmpty()) trimmed else null
                         )
                     }
                 }
                 is Result.Failure -> {
-                    addLog("Search failed: ${result.message}")
+                    addLog("Search failed: ${videoResult.message}")
                     _uiState.update {
                         it.copy(
                             isSearching = false,
                             searchErrorRes = R.string.search_failed,
-                            searchErrorArg = result.message
+                            searchErrorArg = videoResult.message
                         )
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Toggles follow/unfollow status for a creator channel.
+     */
+    fun toggleFollowChannel(channel: Channel) {
+        _uiState.update { current ->
+            val isCurrentlyFollowed = current.followedChannels.contains(channel.id)
+            val newFollowedIds = if (isCurrentlyFollowed) {
+                addLog("Unfollowed channel: ${channel.title}")
+                current.followedChannels - channel.id
+            } else {
+                addLog("Followed channel: ${channel.title}")
+                current.followedChannels + channel.id
+            }
+
+            val newFollowedList = if (isCurrentlyFollowed) {
+                current.followedChannelList.filter { it.id != channel.id }
+            } else {
+                current.followedChannelList + channel.copy(isFollowed = true)
+            }
+
+            // Sync follow state across search results
+            val updatedSearchResults = current.searchResults.map { item ->
+                if (item is SearchResultItem.Creator && item.channel.id == channel.id) {
+                    SearchResultItem.Creator(item.channel.copy(isFollowed = !isCurrentlyFollowed))
+                } else {
+                    item
+                }
+            }
+
+            current.copy(
+                followedChannels = newFollowedIds,
+                followedChannelList = newFollowedList,
+                searchResults = updatedSearchResults
+            )
         }
     }
 
@@ -244,8 +314,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val updatedFeed = current.feedEpisodes.map {
                 if (it.id == episode.id) it.copy(downloadProgress = 0.5f) else it
             }
-            val updatedSearch = current.searchResults.map {
-                if (it.id == episode.id) it.copy(downloadProgress = 0.5f) else it
+            val updatedSearch = current.searchResults.map { item ->
+                if (item is SearchResultItem.Video && item.episode.id == episode.id) {
+                    SearchResultItem.Video(item.episode.copy(downloadProgress = 0.5f))
+                } else {
+                    item
+                }
             }
             current.copy(feedEpisodes = updatedFeed, searchResults = updatedSearch)
         }
