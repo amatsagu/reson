@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,9 +33,9 @@ import androidx.compose.material.icons.filled.NorthWest
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -147,35 +148,37 @@ fun SearchOverlay(
                 .statusBarsPadding()
         ) {
             // Unified Pill Search Bar (Back button, text field, clear, and search icon inside the pill)
+            // Perfectly aligned to the exact same size, position, and padding as SearchPillBar on FeedScreen
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 12.dp, bottom = 12.dp)
                     .height(52.dp)
                     .clip(RoundedCornerShape(26.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .padding(start = 4.dp, end = 6.dp),
+                    .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Back arrow INSIDE search bar pill
-                IconButton(
-                    onClick = {
-                        keyboardController?.hide()
-                        onDismiss()
-                    },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.action_back),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                // Back arrow INSIDE search bar pill (identical size and alignment to the search icon in SearchPillBar)
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.action_back),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = false, radius = 20.dp)
+                        ) {
+                            keyboardController?.hide()
+                            onDismiss()
+                        }
+                )
 
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(12.dp))
 
-                // Text field inside the pill
+                // Text field inside the pill (starts at exact same 50dp offset as SearchPillBar)
                 BasicTextField(
                     value = query,
                     onValueChange = onQueryChange,
@@ -209,34 +212,35 @@ fun SearchOverlay(
 
                 // Clear ('X') button if query is not empty
                 if (query.isNotEmpty()) {
-                    IconButton(
-                        onClick = { onQueryChange("") },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = stringResource(R.string.action_clear),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.action_clear),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = false, radius = 18.dp)
+                            ) { onQueryChange("") }
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
                 }
 
-                // Search icon INSIDE search bar pill
-                IconButton(
-                    onClick = {
-                        keyboardController?.hide()
-                        onSearch(query)
-                    },
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = stringResource(R.string.action_submit_search),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                // Search icon INSIDE search bar pill - onSurfaceVariant tint (white/gray/black, NOT primary colored!)
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = stringResource(R.string.action_submit_search),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = false, radius = 18.dp)
+                        ) {
+                            keyboardController?.hide()
+                            onSearch(query)
+                        }
+                )
             }
 
             // Body: Loading, Suggestions, or Results

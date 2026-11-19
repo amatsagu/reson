@@ -293,7 +293,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
-                releaseDateText = "27.11.26",
+                releaseDateText = "57m ago",
                 playbackProgress = 0.65f
             ),
             Episode(
@@ -302,7 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
-                releaseDateText = "27.11.26",
+                releaseDateText = "1d3h ago",
                 playbackProgress = 0.35f
             )
         )
@@ -314,7 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
-                releaseDateText = "27.11.26",
+                releaseDateText = "57m ago",
                 isDownloaded = false
             ),
             Episode(
@@ -323,7 +323,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
-                releaseDateText = "27.11.26",
+                releaseDateText = "1d3h ago",
                 downloadProgress = 0.75f
             ),
             Episode(
@@ -332,7 +332,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
-                releaseDateText = "27.11.26",
+                releaseDateText = "3d ago",
                 isDownloaded = false
             ),
             Episode(
@@ -341,7 +341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "52m",
                 durationSeconds = 3120,
-                releaseDateText = "27.11.26",
+                releaseDateText = "1w2d ago",
                 isDownloaded = true
             )
         )

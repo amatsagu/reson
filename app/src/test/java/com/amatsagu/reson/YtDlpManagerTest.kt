@@ -43,4 +43,15 @@ class YtDlpManagerTest {
         assertEquals("https://www.youtube.com/watch?v=test_123", episode.webpageUrl)
         assertEquals(0f, episode.playbackProgress, 0.001f)
     }
+
+    @Test
+    fun testFormatRelativeSeconds_compactFormats() {
+        assertEquals("just now", YtDlpManager.formatRelativeSeconds(30))
+        assertEquals("57m ago", YtDlpManager.formatRelativeSeconds(57 * 60))
+        assertEquals("1d3h ago", YtDlpManager.formatRelativeSeconds(27 * 3600))
+        assertEquals("3d ago", YtDlpManager.formatRelativeSeconds(3 * 86400))
+        assertEquals("1w2d ago", YtDlpManager.formatRelativeSeconds(9 * 86400))
+        assertEquals("2mo ago", YtDlpManager.formatRelativeSeconds(65 * 86400))
+        assertEquals("4y ago", YtDlpManager.formatRelativeSeconds(4 * 365 * 86400))
+    }
 }

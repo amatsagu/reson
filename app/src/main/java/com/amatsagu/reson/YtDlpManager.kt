@@ -62,6 +62,66 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 instance ?: YtDlpManager(context.applicationContext).also { instance = it }
             }
         }
+
+        /**
+         * Formats release date into compact relative time to save space:
+         * e.g. "57m ago", "1d3h ago", "3d ago", "2w ago", "4mo ago", "2y ago".
+         */
+        fun formatRelativeDate(timestampSec: Long, rawUploadDate: String = ""): String {
+            val nowSec = System.currentTimeMillis() / 1000L
+            val targetSec = if (timestampSec > 0) {
+                timestampSec
+            } else if (rawUploadDate.length == 8 && rawUploadDate.all { it.isDigit() }) {
+                try {
+                    val sdf = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    }
+                    val parsed = sdf.parse(rawUploadDate)
+                    parsed?.time?.div(1000L) ?: 0L
+                } catch (_: Exception) {
+                    0L
+                }
+            } else {
+                0L
+            }
+
+            if (targetSec <= 0L) {
+                return if (rawUploadDate.isNotBlank()) rawUploadDate else ""
+            }
+
+            val diffSec = maxOf(0L, nowSec - targetSec)
+            return formatRelativeSeconds(diffSec)
+        }
+
+        fun formatRelativeSeconds(diffSec: Long): String {
+            if (diffSec < 60) return "just now"
+            if (diffSec < 3600) {
+                val m = diffSec / 60
+                return "${m}m ago"
+            }
+            if (diffSec < 86400) {
+                val h = diffSec / 3600
+                val remM = (diffSec % 3600) / 60
+                return if (remM > 0 && h < 6) "${h}h${remM}m ago" else "${h}h ago"
+            }
+            val days = diffSec / 86400
+            val remH = (diffSec % 86400) / 3600
+            if (days < 7) {
+                return if (remH > 0) "${days}d${remH}h ago" else "${days}d ago"
+            }
+            if (days < 30) {
+                val w = days / 7
+                val remD = days % 7
+                return if (remD > 0) "${w}w${remD}d ago" else "${w}w ago"
+            }
+            if (days < 365) {
+                val mo = days / 30
+                return "${mo}mo ago"
+            }
+            val y = days / 365
+            val remMo = (days % 365) / 30
+            return if (remMo > 0 && y < 3) "${y}y${remMo}mo ago" else "${y}y ago"
+        }
     }
 
     /**
@@ -252,7 +312,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 addOption("--dump-json")
                 addOption("--skip-download")
                 addOption("--no-warnings")
-                addOption("--extractor-args", "youtube:player_client=android")
+                addOption("--extractor-args", "youtubetab:approximate_date;youtube:player_client=android")
             }
 
             Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget)")
@@ -272,14 +332,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         json.optString("channel", "Unknown Channel")
                     }
                     val duration = json.optInt("duration", 0)
-                    val rawDate = json.optString("upload_date").ifEmpty {
-                        val ts = json.optLong("timestamp", 0L)
-                        if (ts > 0) {
-                            java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.getDefault())
-                                .format(java.util.Date(ts * 1000L))
-                        } else ""
-                    }
-                    val releaseDateText = formatReleaseDate(rawDate)
+                    val timestamp = json.optLong("timestamp", 0L)
+                    val rawDate = json.optString("upload_date", "")
+                    val releaseDateText = formatRelativeDate(timestamp, rawDate)
 
                     var thumb = json.optString("thumbnail", "")
                     if (thumb.isEmpty() && id.isNotEmpty()) {
@@ -310,17 +365,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
             Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
             Result.Failure(e, e.message ?: "Failed to perform search")
         }
-    }
-
-    private fun formatReleaseDate(rawDate: String): String {
-        val trimmed = rawDate.trim()
-        if (trimmed.length == 8 && trimmed.all { it.isDigit() }) { // YYYYMMDD
-            val y = trimmed.substring(2, 4)
-            val m = trimmed.substring(4, 6)
-            val d = trimmed.substring(6, 8)
-            return "$d.$m.$y"
-        }
-        return trimmed
     }
 
     private fun formatDuration(seconds: Int): String {

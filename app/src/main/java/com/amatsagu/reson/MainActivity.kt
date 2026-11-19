@@ -312,7 +312,7 @@ fun ResonFeedPreview() {
                             title = "Reson\nEpisode 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
-                            releaseDateText = "27.11.26",
+                            releaseDateText = "57m ago",
                             playbackProgress = 0.65f
                         ),
                         Episode(
@@ -320,7 +320,7 @@ fun ResonFeedPreview() {
                             title = "Reson\nEpisode 4",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
-                            releaseDateText = "27.11.26",
+                            releaseDateText = "1d3h ago",
                             playbackProgress = 0.35f
                         )
                     ),
@@ -330,14 +330,14 @@ fun ResonFeedPreview() {
                             title = "Reson\nEpisode 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
-                            releaseDateText = "27.11.26"
+                            releaseDateText = "57m ago"
                         ),
                         Episode(
                             id = "e5_2",
                             title = "Reson\nEpisode 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
-                            releaseDateText = "27.11.26",
+                            releaseDateText = "1d3h ago",
                             downloadProgress = 0.75f
                         ),
                         Episode(
@@ -345,7 +345,7 @@ fun ResonFeedPreview() {
                             title = "Reson\nEpisode • 3",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
-                            releaseDateText = "27.11.26"
+                            releaseDateText = "3d ago"
                         )
                     )
                 ),
