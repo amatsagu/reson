@@ -1,0 +1,245 @@
+package com.amatsagu.reson
+
+import android.content.Context
+import android.util.Log
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
+import com.yausername.youtubedl_android.YoutubeDL.UpdateStatus
+import com.yausername.youtubedl_android.YoutubeDLException
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import com.yausername.youtubedl_android.YoutubeDLResponse
+import com.yausername.youtubedl_android.mapper.VideoInfo
+import com.yausername.ffmpeg.FFmpeg
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
+
+/**
+ * State representing the lifecycle and health of yt-dlp.
+ * In Go terms, think of this as an enum/tagged union representing current engine health.
+ */
+sealed interface YtDlpState {
+    data object Uninitialized : YtDlpState
+    data object Initializing : YtDlpState
+    data class Ready(val version: String, val statusMessage: String? = null) : YtDlpState
+    data class Updating(val currentVersion: String, val message: String = "Downloading latest yt-dlp...") : YtDlpState
+    data class Error(val message: String, val canRecover: Boolean = true) : YtDlpState
+}
+
+/**
+ * Result wrapper for yt-dlp operations (like Go's `(result, error)` tuple).
+ */
+sealed class Result<out T> {
+    data class Success<T>(val data: T) : Result<T>()
+    data class Failure(val error: Throwable, val message: String) : Result<Nothing>()
+}
+
+/**
+ * Singleton manager for yt-dlp operations on Android.
+ * Handles initialization, self-patching (auto-updates), self-recovery on corruption,
+ * and command execution.
+ */
+class YtDlpManager private constructor(private val appContext: Context) {
+
+    private val _state = MutableStateFlow<YtDlpState>(YtDlpState.Uninitialized)
+    val state: StateFlow<YtDlpState> = _state.asStateFlow()
+
+    private val mutex = Mutex()
+
+    companion object {
+        private const val TAG = "Reson:YtDlp"
+
+        @Volatile
+        private var instance: YtDlpManager? = null
+
+        fun getInstance(context: Context): YtDlpManager {
+            return instance ?: synchronized(this) {
+                instance ?: YtDlpManager(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
+    /**
+     * Initializes yt-dlp and FFmpeg. If initialization fails (e.g., file corruption from an interrupted
+     * write/update), it performs an automatic self-recovery by wiping the corrupted binaries and re-extracting.
+     */
+    suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            if (_state.value is YtDlpState.Ready) {
+                return@withContext true
+            }
+
+            _state.value = YtDlpState.Initializing
+            Log.i(TAG, "Initializing yt-dlp...")
+
+            try {
+                // Initialize core yt-dlp binaries
+                YoutubeDL.getInstance().init(appContext)
+
+                // Initialize FFmpeg (for audio postprocessing / remuxing)
+                try {
+                    FFmpeg.getInstance().init(appContext)
+                    Log.i(TAG, "FFmpeg initialized successfully")
+                } catch (e: Exception) {
+                    Log.w(TAG, "FFmpeg initialization warning: ${e.message}")
+                }
+
+                val version = getVersionName()
+                _state.value = YtDlpState.Ready(version = version, statusMessage = "yt-dlp is ready ($version)")
+                Log.i(TAG, "yt-dlp initialized successfully, version: $version")
+                true
+            } catch (e: Throwable) {
+                Log.e(TAG, "yt-dlp initialization failed. Attempting self-recovery...", e)
+                performSelfRecovery()
+            }
+        }
+    }
+
+    /**
+     * Self-recovery routine:
+     * Wipes any corrupted or partially-downloaded binaries in app's internal storage
+     * and attempts a clean re-initialization from the APK's bundled assets.
+     */
+    suspend fun performSelfRecovery(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            Log.w(TAG, "Starting self-recovery: cleaning up binaries in filesDir...")
+            _state.value = YtDlpState.Initializing
+
+            // Clean directories where youtubedl-android extracts binaries
+            val filesDir = appContext.filesDir
+            val targets = listOf(
+                File(filesDir, "youtubedl"),
+                File(filesDir, "no-pie"),
+                File(filesDir, "bin"),
+                File(appContext.cacheDir, "youtubedl")
+            )
+
+            for (target in targets) {
+                if (target.exists()) {
+                    target.deleteRecursively()
+                    Log.d(TAG, "Deleted: ${target.absolutePath}")
+                }
+            }
+
+            // Retry initialization with a clean slate
+            YoutubeDL.getInstance().init(appContext)
+            try {
+                FFmpeg.getInstance().init(appContext)
+            } catch (_: Exception) {}
+
+            val version = getVersionName()
+            _state.value = YtDlpState.Ready(
+                version = version,
+                statusMessage = "Recovered successfully. Re-initialized to $version"
+            )
+            Log.i(TAG, "Self-recovery succeeded! Current version: $version")
+            true
+        } catch (recoveryError: Throwable) {
+            val msg = "Self-recovery failed: ${recoveryError.message ?: "Unknown error"}"
+            Log.e(TAG, msg, recoveryError)
+            _state.value = YtDlpState.Error(message = msg, canRecover = true)
+            false
+        }
+    }
+
+    /**
+     * Self-patching / Updates yt-dlp to the latest release directly from upstream GitHub releases.
+     * Can target STABLE or MASTER channels.
+     */
+    suspend fun update(channel: UpdateChannel = UpdateChannel.STABLE): Result<String> = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val currentVersion = getVersionName()
+            _state.value = YtDlpState.Updating(currentVersion = currentVersion)
+            Log.i(TAG, "Checking for yt-dlp updates (channel: $channel)...")
+
+            try {
+                val updateStatus = YoutubeDL.getInstance().updateYoutubeDL(appContext, channel)
+                val newVersion = getVersionName()
+
+                val message = when (updateStatus) {
+                    UpdateStatus.DONE -> "Successfully updated yt-dlp from $currentVersion to $newVersion"
+                    UpdateStatus.ALREADY_UP_TO_DATE -> "yt-dlp is already up to date ($newVersion)"
+                    null -> "Update status unknown. Current version: $newVersion"
+                }
+
+                Log.i(TAG, message)
+                _state.value = YtDlpState.Ready(version = newVersion, statusMessage = message)
+                Result.Success(message)
+            } catch (e: YoutubeDLException) {
+                Log.e(TAG, "Failed to update yt-dlp: ${e.message}", e)
+                // If update fails, do not brick the app — keep the existing working version if possible
+                val fallbackVersion = getVersionName()
+                val errorMsg = "Update failed: ${e.message}. Remaining on $fallbackVersion"
+                _state.value = YtDlpState.Ready(version = fallbackVersion, statusMessage = errorMsg)
+                Result.Failure(e, errorMsg)
+            } catch (e: Throwable) {
+                val errorMsg = "Unexpected error during update: ${e.message}"
+                Log.e(TAG, errorMsg, e)
+                _state.value = YtDlpState.Error(message = errorMsg, canRecover = true)
+                Result.Failure(e, errorMsg)
+            }
+        }
+    }
+
+    /**
+     * Fetches metadata for a given YouTube URL (podcast episode, playlist, or video).
+     * If an extraction error occurs (which commonly happens when YouTube alters player APIs),
+     * it can automatically trigger self-patching and retry once.
+     */
+    suspend fun fetchVideoInfo(url: String, autoRetryWithUpdate: Boolean = true): Result<VideoInfo> = withContext(Dispatchers.IO) {
+        try {
+            ensureReady()
+            val info = YoutubeDL.getInstance().getInfo(url)
+            Result.Success(info)
+        } catch (e: YoutubeDLException) {
+            Log.w(TAG, "yt-dlp extraction error for URL: $url: ${e.message}")
+            if (autoRetryWithUpdate) {
+                Log.i(TAG, "Attempting auto-patch update and retry...")
+                val updateResult = update(UpdateChannel.STABLE)
+                if (updateResult is Result.Success) {
+                    return@withContext try {
+                        val retryInfo = YoutubeDL.getInstance().getInfo(url)
+                        Result.Success(retryInfo)
+                    } catch (retryError: Throwable) {
+                        Result.Failure(retryError, "Extraction failed even after updating: ${retryError.message}")
+                    }
+                }
+            }
+            Result.Failure(e, e.message ?: "Failed to fetch video information")
+        } catch (e: Throwable) {
+            Result.Failure(e, e.message ?: "Unexpected error")
+        }
+    }
+
+    /**
+     * Executes custom yt-dlp arguments and returns the raw response.
+     */
+    suspend fun executeRaw(request: YoutubeDLRequest): Result<YoutubeDLResponse> = withContext(Dispatchers.IO) {
+        try {
+            ensureReady()
+            val response = YoutubeDL.getInstance().execute(request)
+            Result.Success(response)
+        } catch (e: Throwable) {
+            Result.Failure(e, e.message ?: "Command execution failed")
+        }
+    }
+
+    private fun ensureReady() {
+        if (_state.value !is YtDlpState.Ready) {
+            throw IllegalStateException("yt-dlp is not ready. Current state: ${_state.value}")
+        }
+    }
+
+    private fun getVersionName(): String {
+        return try {
+            YoutubeDL.getInstance().versionName(appContext) ?: "Unknown"
+        } catch (_: Exception) {
+            "Unknown"
+        }
+    }
+}
