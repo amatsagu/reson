@@ -6,9 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amatsagu.reson.data.SearchSuggestClient
 import com.amatsagu.reson.model.Channel
-import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.ResonTab
 import com.amatsagu.reson.model.SearchResultItem
+import com.amatsagu.reson.model.Video
 import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -48,11 +48,11 @@ data class MainUiState(
     val followedChannelList: List<Channel> = emptyList(),
 
     // Feed / Home Content
-    val continueEpisodes: List<Episode> = emptyList(),
-    val feedEpisodes: List<Episode> = emptyList(),
+    val continueVideos: List<Video> = emptyList(),
+    val feedVideos: List<Video> = emptyList(),
 
     // Mini Player State
-    val currentPlayingEpisode: Episode? = null,
+    val currentPlayingVideo: Video? = null,
     val isPlaying: Boolean = false,
 
     // Diagnostics
@@ -183,7 +183,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Executes YouTube fast search for top 30 episodes.
+     * Executes YouTube fast search for top 30 videos.
      */
     fun executeSearch(query: String) {
         val trimmed = query.trim()
@@ -292,11 +292,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playEpisode(episode: Episode) {
-        addLog("Playing episode: ${episode.title}")
+    fun playVideo(video: Video) {
+        addLog("Playing video: ${video.title}")
         _uiState.update {
             it.copy(
-                currentPlayingEpisode = episode,
+                currentPlayingVideo = video,
                 isPlaying = true
             )
         }
@@ -308,20 +308,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun downloadEpisode(episode: Episode) {
-        addLog("Download requested for: ${episode.title}")
+    fun downloadVideo(video: Video) {
+        addLog("Download requested for: ${video.title}")
         _uiState.update { current ->
-            val updatedFeed = current.feedEpisodes.map {
-                if (it.id == episode.id) it.copy(downloadProgress = 0.5f) else it
+            val updatedFeed = current.feedVideos.map {
+                if (it.id == video.id) it.copy(downloadProgress = 0.5f) else it
             }
             val updatedSearch = current.searchResults.map { item ->
-                if (item is SearchResultItem.Video && item.episode.id == episode.id) {
-                    SearchResultItem.Video(item.episode.copy(downloadProgress = 0.5f))
+                if (item is SearchResultItem.Video && item.video.id == video.id) {
+                    SearchResultItem.Video(item.video.copy(downloadProgress = 0.5f))
                 } else {
                     item
                 }
             }
-            current.copy(feedEpisodes = updatedFeed, searchResults = updatedSearch)
+            current.copy(feedVideos = updatedFeed, searchResults = updatedSearch)
         }
     }
 
@@ -361,18 +361,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun loadDefaultContent() {
         val continueList = listOf(
-            Episode(
+            Video(
                 id = "mock_c1",
-                title = "Reson\nEpisode 5",
+                title = "Reson\nVideo 5",
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
                 releaseDateText = "57m ago",
                 playbackProgress = 0.65f
             ),
-            Episode(
+            Video(
                 id = "mock_c2",
-                title = "Reson\nEpisode 4",
+                title = "Reson\nVideo 4",
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
@@ -382,36 +382,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val feedList = listOf(
-            Episode(
+            Video(
                 id = "mock_e5",
-                title = "Reson\nEpisode 5",
+                title = "Reson\nVideo 5",
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
                 releaseDateText = "57m ago",
                 isDownloaded = false
             ),
-            Episode(
+            Video(
                 id = "mock_e4",
-                title = "Reson\nEpisode 5",
+                title = "Reson\nVideo 5",
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
                 releaseDateText = "1d3h ago",
                 downloadProgress = 0.75f
             ),
-            Episode(
+            Video(
                 id = "mock_e3",
-                title = "Reson\nEpisode • 3",
+                title = "Reson\nVideo • 3",
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
                 releaseDateText = "3d ago",
                 isDownloaded = false
             ),
-            Episode(
+            Video(
                 id = "mock_e2",
-                title = "Reson\nEpisode 2",
+                title = "Reson\nVideo 2",
                 channelTitle = "Channel Reson",
                 durationText = "52m",
                 durationSeconds = 3120,
@@ -422,9 +422,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         _uiState.update {
             it.copy(
-                continueEpisodes = continueList,
-                feedEpisodes = feedList,
-                currentPlayingEpisode = continueList.first()
+                continueVideos = continueList,
+                feedVideos = feedList,
+                currentPlayingVideo = continueList.first()
             )
         }
     }

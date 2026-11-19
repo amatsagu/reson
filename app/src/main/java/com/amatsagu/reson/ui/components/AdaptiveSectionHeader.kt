@@ -24,8 +24,8 @@ fun AdaptiveSectionHeader(
     textStyle: TextStyle = TextStyle(
         fontSize = 18.sp,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.onSurface
-    )
+        color = MaterialTheme.colorScheme.onSurface,
+    ),
 ) {
     val textMeasurer = rememberTextMeasurer()
     val density = LocalDensity.current

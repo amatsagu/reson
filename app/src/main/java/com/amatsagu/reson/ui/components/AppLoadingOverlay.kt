@@ -69,15 +69,7 @@ fun AppLoadingOverlay(
                     letterSpacing = 1.sp
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = stringResource(R.string.podcast_engine),
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(48.dp))
+                Spacer(modifier = Modifier.height(36.dp))
 
                 CircularProgressIndicator(
                     modifier = Modifier.size(36.dp),

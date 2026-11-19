@@ -15,8 +15,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Custom clean progress bar that removes the weird Material 3 thumb dot at the end of the bar.
- * Uses a smooth clipped background container with no dot or indicator artifact.
+ * Linear progress bar with rounded ends and no thumb dot indicator.
  */
 @Composable
 fun ResonProgressBar(
@@ -24,7 +23,7 @@ fun ResonProgressBar(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
-    height: Dp = 4.dp
+    height: Dp = 4.dp,
 ) {
     val cornerRadius = height / 2
     Box(

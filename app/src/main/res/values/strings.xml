@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">Reson</string>
-    <string name="podcast_engine">Podcast Engine</string>
 
     <!-- Navigation Tabs -->
     <string name="tab_feed">Feed</string>
@@ -33,23 +32,23 @@
 
     <!-- Search -->
     <string name="search_content">Search content</string>
-    <string name="search_searching">Searching YouTube podcasts…</string>
+    <string name="search_searching">Searching YouTube videos…</string>
     <string name="search_results_count">Results (%1$d)</string>
     <string name="search_no_results">No results found for \"%1$s\"</string>
-    <string name="search_empty_hint">Search podcasts, episodes or paste links</string>
+    <string name="search_empty_hint">Search videos, channels or paste links</string>
     <string name="search_failed">Search failed: %1$s</string>
 
-    <!-- Engine & Loading Status -->
-    <string name="loading_starting_engine">Starting podcast engine…</string>
-    <string name="loading_connecting_engine">Connecting to engine…</string>
-    <string name="loading_initializing_runtime">Initializing yt-dlp runtime…</string>
-    <string name="loading_updating_upstream">Updating yt-dlp to latest upstream…</string>
+    <!-- App Startup & Loading Status -->
+    <string name="loading_starting_engine">Starting up…</string>
+    <string name="loading_connecting_engine">Connecting…</string>
+    <string name="loading_initializing_runtime">Initializing…</string>
+    <string name="loading_updating_upstream">Checking for updates…</string>
     <string name="status_ready">Ready (%1$s)</string>
     <string name="status_updating">Updating…</string>
     <string name="status_initializing">Initializing…</string>
     <string name="status_uninitialized">Uninitialized</string>
     <string name="status_error">Error: %1$s</string>
-    <string name="status_offline_mode">Offline mode (Engine error: %1$s)</string>
+    <string name="status_offline_mode">Offline mode (%1$s)</string>
 
     <!-- Channels Screen -->
     <string name="channels_title">Channels</string>
@@ -57,7 +56,7 @@
 
     <!-- Library Screen -->
     <string name="library_title">Library &amp; Maintenance</string>
-    <string name="library_engine_status">yt-dlp Engine Status</string>
+    <string name="library_engine_status">System Status</string>
 
     <!-- General Placeholders -->
     <string name="placeholder_untitled">Untitled</string>

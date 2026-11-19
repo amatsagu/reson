@@ -33,17 +33,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amatsagu.reson.model.Channel
-import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.ResonTab
+import com.amatsagu.reson.model.Video
 import com.amatsagu.reson.ui.components.AdaptiveSectionHeader
 import com.amatsagu.reson.ui.components.AppLoadingOverlay
 import com.amatsagu.reson.ui.components.ChannelItem
 import com.amatsagu.reson.ui.components.ContinueSection
-import com.amatsagu.reson.ui.components.EpisodeItem
 import com.amatsagu.reson.ui.components.MiniPlayerBar
 import com.amatsagu.reson.ui.components.ResonBottomNavBar
 import com.amatsagu.reson.ui.components.SearchOverlay
 import com.amatsagu.reson.ui.components.SearchPillBar
+import com.amatsagu.reson.ui.components.VideoItem
 import com.amatsagu.reson.ui.theme.ResonTheme
 
 class MainActivity : ComponentActivity() {
@@ -76,9 +76,9 @@ fun ResonApp(viewModel: MainViewModel) {
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
                 Column {
-                    uiState.currentPlayingEpisode?.let { episode ->
+                    uiState.currentPlayingVideo?.let { video ->
                         MiniPlayerBar(
-                            episode = episode,
+                            video = video,
                             isPlaying = uiState.isPlaying,
                             onPlayPauseClick = { viewModel.togglePlayPause() },
                             onClick = {}
@@ -97,8 +97,8 @@ fun ResonApp(viewModel: MainViewModel) {
                     FeedScreen(
                         uiState = uiState,
                         onSearchClick = { viewModel.openSearch() },
-                        onPlayEpisode = { viewModel.playEpisode(it) },
-                        onDownloadEpisode = { viewModel.downloadEpisode(it) },
+                        onPlayVideo = { viewModel.playVideo(it) },
+                        onDownloadVideo = { viewModel.downloadVideo(it) },
                         contentPadding = innerPadding
                     )
                 }
@@ -132,8 +132,8 @@ fun ResonApp(viewModel: MainViewModel) {
             searchResults = uiState.searchResults,
             errorRes = uiState.searchErrorRes,
             errorArg = uiState.searchErrorArg,
-            onPlayEpisode = { viewModel.playEpisode(it) },
-            onDownloadEpisode = { viewModel.downloadEpisode(it) },
+            onPlayVideo = { viewModel.playVideo(it) },
+            onDownloadVideo = { viewModel.downloadVideo(it) },
             onFollowChannel = { viewModel.toggleFollowChannel(it) }
         )
 
@@ -156,9 +156,9 @@ fun ResonApp(viewModel: MainViewModel) {
 fun FeedScreen(
     uiState: MainUiState,
     onSearchClick: () -> Unit,
-    onPlayEpisode: (Episode) -> Unit,
-    onDownloadEpisode: (Episode) -> Unit,
-    contentPadding: PaddingValues
+    onPlayVideo: (Video) -> Unit,
+    onDownloadVideo: (Video) -> Unit,
+    contentPadding: PaddingValues,
 ) {
     LazyColumn(
         modifier = Modifier
@@ -167,8 +167,7 @@ fun FeedScreen(
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Search bar pill
-        item {
+        item(key = "search_bar", contentType = "search") {
             Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                 SearchPillBar(
                     query = "",
@@ -177,16 +176,14 @@ fun FeedScreen(
             }
         }
 
-        // Continue section
-        item {
+        item(key = "continue_section", contentType = "continue") {
             ContinueSection(
-                episodes = uiState.continueEpisodes,
-                onPlayClick = onPlayEpisode
+                videos = uiState.continueVideos,
+                onPlayClick = onPlayVideo
             )
         }
 
-        // Recommended content header (adapts to "Recommended" when width is constrained)
-        item {
+        item(key = "recommended_header", contentType = "header") {
             AdaptiveSectionHeader(
                 fullTitle = stringResource(R.string.section_recommended_content),
                 shortTitle = stringResource(R.string.section_recommended_short),
@@ -194,17 +191,16 @@ fun FeedScreen(
             )
         }
 
-        // Vertical episodes list
         items(
-            items = uiState.feedEpisodes,
+            items = uiState.feedVideos,
             key = { it.id },
-            contentType = { "feed_episode" }
-        ) { episode ->
+            contentType = { "feed_video" }
+        ) { video ->
             Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                EpisodeItem(
-                    episode = episode,
-                    onPlayClick = { onPlayEpisode(episode) },
-                    onDownloadClick = { onDownloadEpisode(episode) }
+                VideoItem(
+                    video = video,
+                    onPlayClick = { onPlayVideo(video) },
+                    onDownloadClick = { onDownloadVideo(video) }
                 )
             }
         }
@@ -334,43 +330,43 @@ fun ResonFeedPreview() {
         ) {
             FeedScreen(
                 uiState = MainUiState(
-                    continueEpisodes = listOf(
-                        Episode(
+                    continueVideos = listOf(
+                        Video(
                             id = "c1",
-                            title = "Reson\nEpisode 5",
+                            title = "Reson\nVideo 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
                             releaseDateText = "57m ago",
                             playbackProgress = 0.65f
                         ),
-                        Episode(
+                        Video(
                             id = "c2",
-                            title = "Reson\nEpisode 4",
+                            title = "Reson\nVideo 4",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
                             releaseDateText = "1d3h ago",
                             playbackProgress = 0.35f
                         )
                     ),
-                    feedEpisodes = listOf(
-                        Episode(
+                    feedVideos = listOf(
+                        Video(
                             id = "e5",
-                            title = "Reson\nEpisode 5",
+                            title = "Reson\nVideo 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
                             releaseDateText = "57m ago"
                         ),
-                        Episode(
+                        Video(
                             id = "e5_2",
-                            title = "Reson\nEpisode 5",
+                            title = "Reson\nVideo 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
                             releaseDateText = "1d3h ago",
                             downloadProgress = 0.75f
                         ),
-                        Episode(
+                        Video(
                             id = "e3",
-                            title = "Reson\nEpisode • 3",
+                            title = "Reson\nVideo • 3",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
                             releaseDateText = "3d ago"
@@ -378,8 +374,8 @@ fun ResonFeedPreview() {
                     )
                 ),
                 onSearchClick = {},
-                onPlayEpisode = {},
-                onDownloadEpisode = {},
+                onPlayVideo = {},
+                onDownloadVideo = {},
                 contentPadding = PaddingValues(0.dp)
             )
         }

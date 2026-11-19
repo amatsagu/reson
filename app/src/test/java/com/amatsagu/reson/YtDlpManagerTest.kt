@@ -14,6 +14,16 @@ class YtDlpManagerTest {
     }
 
     @Test
+    fun testCleanVersion_stripsYtDlpPrefix() {
+        assertEquals("2025.01.15", YtDlpManager.cleanVersion("yt-dlp 2025.01.15"))
+        assertEquals("2025.01.15", YtDlpManager.cleanVersion("yt-dlp   2025.01.15"))
+        assertEquals("2025.01.15", YtDlpManager.cleanVersion("2025.01.15"))
+        assertEquals("2024.12.23", YtDlpManager.cleanVersion("YT-DLP 2024.12.23"))
+        assertEquals("Unknown", YtDlpManager.cleanVersion(""))
+        assertEquals("Unknown", YtDlpManager.cleanVersion(null))
+    }
+
+    @Test
     fun testResult_successAndFailure() {
         val success: Result<String> = Result.Success("Update complete")
         assertTrue(success is Result.Success)
@@ -31,17 +41,17 @@ class YtDlpManagerTest {
     }
 
     @Test
-    fun testEpisode_creationAndDefaults() {
-        val episode = com.amatsagu.reson.model.Episode(
+    fun testVideo_creationAndDefaults() {
+        val video = com.amatsagu.reson.model.Video(
             id = "test_123",
-            title = "Test Episode",
+            title = "Test Video",
             channelTitle = "Test Channel",
             durationText = "45m",
             durationSeconds = 2700
         )
-        assertEquals("test_123", episode.id)
-        assertEquals("https://www.youtube.com/watch?v=test_123", episode.webpageUrl)
-        assertEquals(0f, episode.playbackProgress, 0.001f)
+        assertEquals("test_123", video.id)
+        assertEquals("https://www.youtube.com/watch?v=test_123", video.webpageUrl)
+        assertEquals(0f, video.playbackProgress, 0.001f)
     }
 
     @Test
@@ -80,7 +90,7 @@ class YtDlpManagerTest {
     @Test
     fun testMergeSearchResults_channelHighInTop5AndCapsAt30() {
         val videos = (1..35).map {
-            com.amatsagu.reson.model.Episode(
+            com.amatsagu.reson.model.Video(
                 id = "v$it",
                 title = "Video $it",
                 channelTitle = "Test Channel",

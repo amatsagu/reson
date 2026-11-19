@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,19 +38,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amatsagu.reson.R
-import com.amatsagu.reson.model.Episode
+import com.amatsagu.reson.model.Video
 
 /**
- * "Continue listening" section with horizontal cards matching the design screenshot.
- * Uses smart adaptive header that shortens to "Continue" when width is constrained.
+ * Section displaying in-progress videos in a horizontal carousel.
+ * Uses an adaptive section header that shortens to "Continue" on narrow screens.
  */
 @Composable
 fun ContinueSection(
-    episodes: List<Episode>,
-    onPlayClick: (Episode) -> Unit,
-    modifier: Modifier = Modifier
+    videos: List<Video>,
+    onPlayClick: (Video) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    if (episodes.isEmpty()) return
+    if (videos.isEmpty()) return
 
     Column(modifier = modifier.fillMaxWidth()) {
         AdaptiveSectionHeader(
@@ -63,13 +64,13 @@ fun ContinueSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(
-                items = episodes,
+                items = videos,
                 key = { it.id },
-                contentType = { "continue_episode" }
-            ) { episode ->
+                contentType = { "continue_video" }
+            ) { video ->
                 ContinueCard(
-                    episode = episode,
-                    onPlayClick = { onPlayClick(episode) }
+                    video = video,
+                    onPlayClick = { onPlayClick(video) }
                 )
             }
         }
@@ -78,9 +79,9 @@ fun ContinueSection(
 
 @Composable
 fun ContinueCard(
-    episode: Episode,
+    video: Video,
     onPlayClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Card(
         modifier = modifier
@@ -96,11 +97,10 @@ fun ContinueCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left artwork
-            if (episode.thumbnailUrl.isNotBlank()) {
+            if (video.thumbnailUrl.isNotBlank()) {
                 AsyncImage(
-                    model = episode.thumbnailUrl,
-                    contentDescription = episode.title,
+                    model = video.thumbnailUrl,
+                    contentDescription = video.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(68.dp)
@@ -126,7 +126,6 @@ fun ContinueCard(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Middle info + progress
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -135,7 +134,7 @@ fun ContinueCard(
             ) {
                 Column {
                     Text(
-                        text = episode.title,
+                        text = video.title,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -145,15 +144,17 @@ fun ContinueCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    val subtitle = buildString {
-                        append(episode.channelTitle)
-                        if (episode.durationText.isNotBlank()) {
-                            append(" · ")
-                            append(episode.durationText)
-                        }
-                        if (episode.releaseDateText.isNotBlank()) {
-                            append(" · ")
-                            append(episode.releaseDateText)
+                    val subtitle = remember(video.channelTitle, video.durationText, video.releaseDateText) {
+                        buildString {
+                            append(video.channelTitle)
+                            if (video.durationText.isNotBlank()) {
+                                append(" · ")
+                                append(video.durationText)
+                            }
+                            if (video.releaseDateText.isNotBlank()) {
+                                append(" · ")
+                                append(video.releaseDateText)
+                            }
                         }
                     }
 
@@ -166,9 +167,8 @@ fun ContinueCard(
                     )
                 }
 
-                // Clean Progress Bar with no weird dot at the end
                 ResonProgressBar(
-                    progress = episode.playbackProgress,
+                    progress = video.playbackProgress,
                     height = 4.dp,
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -178,7 +178,6 @@ fun ContinueCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Right play button
             Box(
                 modifier = Modifier
                     .size(36.dp)

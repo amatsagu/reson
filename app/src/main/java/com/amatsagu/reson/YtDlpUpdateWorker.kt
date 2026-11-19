@@ -14,12 +14,11 @@ import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import java.util.concurrent.TimeUnit
 
 /**
- * Background worker to keep yt-dlp patched silently when the device is idle/connected.
- * In Go terms, this is an OS-managed cron job that wakes up a goroutine under specific system constraints.
+ * Background worker to keep yt-dlp updated silently when the device is connected to a network.
  */
 class YtDlpUpdateWorker(
     appContext: Context,
-    params: WorkerParameters
+    params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
@@ -54,14 +53,14 @@ class YtDlpUpdateWorker(
         fun enqueuePeriodicUpdate(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
-                .setRequiresBatteryNotLow(true)
+                .setRequiresBatteryNotLow(requiresBatteryNotLow = true)
                 .build()
 
             val updateRequest = PeriodicWorkRequestBuilder<YtDlpUpdateWorker>(
                 repeatInterval = 24,
                 repeatIntervalTimeUnit = TimeUnit.HOURS,
                 flexTimeInterval = 6,
-                flexTimeIntervalUnit = TimeUnit.HOURS
+                flexTimeIntervalUnit = TimeUnit.HOURS,
             )
                 .setConstraints(constraints)
                 .build()

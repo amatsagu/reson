@@ -55,8 +55,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Channel
-import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.SearchResultItem
+import com.amatsagu.reson.model.Video
 import kotlinx.coroutines.delay
 
 /**
@@ -66,7 +66,7 @@ import kotlinx.coroutines.delay
 fun SearchPillBar(
     query: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
@@ -76,7 +76,7 @@ fun SearchPillBar(
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = Icons.Default.Search,
@@ -122,10 +122,10 @@ fun SearchOverlay(
     searchResults: List<SearchResultItem>,
     @androidx.annotation.StringRes errorRes: Int? = null,
     errorArg: String? = null,
-    onPlayEpisode: (Episode) -> Unit,
-    onDownloadEpisode: (Episode) -> Unit,
+    onPlayVideo: (Video) -> Unit,
+    onDownloadVideo: (Video) -> Unit,
     onFollowChannel: (Channel) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -274,11 +274,7 @@ fun SearchOverlay(
                     }
 
                     errorRes != null -> {
-                        val errorText = if (errorArg != null) {
-                            stringResource(errorRes, errorArg)
-                        } else {
-                            stringResource(errorRes)
-                        }
+                        val errorText = errorArg?.let { stringResource(errorRes, it) } ?: stringResource(errorRes)
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -323,10 +319,10 @@ fun SearchOverlay(
                             ) { item ->
                                 when (item) {
                                     is SearchResultItem.Video -> {
-                                        EpisodeItem(
-                                            episode = item.episode,
-                                            onPlayClick = { onPlayEpisode(item.episode) },
-                                            onDownloadClick = { onDownloadEpisode(item.episode) }
+                                        VideoItem(
+                                            video = item.video,
+                                            onPlayClick = { onPlayVideo(item.video) },
+                                            onDownloadClick = { onDownloadVideo(item.video) }
                                         )
                                     }
                                     is SearchResultItem.Creator -> {

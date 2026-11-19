@@ -17,10 +17,10 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,18 +32,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amatsagu.reson.R
-import com.amatsagu.reson.model.Episode
+import com.amatsagu.reson.model.Video
 
 /**
- * Docked mini audio player bar with dynamic theming.
+ * Docked mini audio/video player bar displayed above the bottom navigation.
  */
 @Composable
 fun MiniPlayerBar(
-    episode: Episode,
+    video: Video,
     isPlaying: Boolean,
     onPlayPauseClick: () -> Unit,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
@@ -57,22 +57,24 @@ fun MiniPlayerBar(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Artwork
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) {
-                if (episode.thumbnailUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = episode.thumbnailUrl,
-                        contentDescription = episode.title,
-                        modifier = Modifier.fillMaxWidth(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
+            if (video.thumbnailUrl.isNotBlank()) {
+                AsyncImage(
+                    model = video.thumbnailUrl,
+                    contentDescription = video.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
                         text = stringResource(R.string.app_name),
                         fontSize = 11.sp,
@@ -84,27 +86,29 @@ fun MiniPlayerBar(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Title & Channel
             Column(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = episode.title,
+                    text = video.title,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val subtitle = buildString {
-                    append(episode.channelTitle)
-                    if (episode.durationText.isNotBlank()) {
-                        append(" · ")
-                        append(episode.durationText)
-                    }
-                    if (episode.releaseDateText.isNotBlank()) {
-                        append(" · ")
-                        append(episode.releaseDateText)
+
+                val subtitle = remember(video.channelTitle, video.durationText, video.releaseDateText) {
+                    buildString {
+                        append(video.channelTitle)
+                        if (video.durationText.isNotBlank()) {
+                            append(" · ")
+                            append(video.durationText)
+                        }
+                        if (video.releaseDateText.isNotBlank()) {
+                            append(" · ")
+                            append(video.releaseDateText)
+                        }
                     }
                 }
 
@@ -117,7 +121,6 @@ fun MiniPlayerBar(
                 )
             }
 
-            // Controls
             IconButton(onClick = onPlayPauseClick) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -128,9 +131,8 @@ fun MiniPlayerBar(
             }
         }
 
-        // Clean bottom progress line without thumb dot
         ResonProgressBar(
-            progress = episode.playbackProgress,
+            progress = video.playbackProgress,
             height = 2.dp,
             color = MaterialTheme.colorScheme.primary,
             trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,

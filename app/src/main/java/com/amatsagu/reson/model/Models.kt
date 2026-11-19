@@ -4,10 +4,9 @@ import androidx.annotation.StringRes
 import com.amatsagu.reson.R
 
 /**
- * Representation of a podcast episode / video item.
- * In Go terms, this is our core domain struct.
+ * Domain model representing a YouTube video item.
  */
-data class Episode(
+data class Video(
     val id: String,
     val title: String,
     val channelTitle: String,
@@ -41,12 +40,12 @@ data class Channel(
 sealed interface SearchResultItem {
     val id: String
 
-    data class Video(val episode: Episode) : SearchResultItem {
-        override val id: String get() = "video_${episode.id}"
+    data class Video(val video: com.amatsagu.reson.model.Video) : SearchResultItem {
+        override val id: String = "video_${video.id}"
     }
 
     data class Creator(val channel: Channel) : SearchResultItem {
-        override val id: String get() = "channel_${channel.id}"
+        override val id: String = "channel_${channel.id}"
     }
 }
 

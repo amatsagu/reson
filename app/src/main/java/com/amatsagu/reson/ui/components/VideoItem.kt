@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,46 +33,43 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.amatsagu.reson.R
-import com.amatsagu.reson.model.Episode
+import com.amatsagu.reson.model.Video
+
+private val VideoThumbnailShape = RoundedCornerShape(12.dp)
+private val DualActionCapsuleShape = RoundedCornerShape(22.dp)
 
 /**
- * Reusable Episode row with dynamic theming:
- * Left: Rounded artwork
- * Center: Title & Channel · Duration
- * Right: Dual-action capsule pill (Play | Download)
+ * Row representing a YouTube video with 16:9 thumbnail, metadata, and play/download actions.
+ * Optimized with static shapes, direct string formatting, and fixed dimensions for 120fps scrolling.
  */
 @Composable
-fun EpisodeItem(
-    episode: Episode,
+fun VideoItem(
+    video: Video,
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 16:9 Standard YouTube Aspect Ratio Video Thumbnail
-        // Flattened: Directly modifier-styled AsyncImage eliminates redundant wrapper Box layout nodes
-        if (episode.thumbnailUrl.isNotBlank()) {
+        if (video.thumbnailUrl.isNotBlank()) {
             AsyncImage(
-                model = episode.thumbnailUrl,
-                contentDescription = episode.title,
+                model = video.thumbnailUrl,
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .height(54.dp)
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(width = 96.dp, height = 54.dp)
+                    .clip(VideoThumbnailShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
         } else {
             Box(
                 modifier = Modifier
-                    .height(54.dp)
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(width = 96.dp, height = 54.dp)
+                    .clip(VideoThumbnailShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center
             ) {
@@ -89,14 +84,13 @@ fun EpisodeItem(
 
         Spacer(modifier = Modifier.width(14.dp))
 
-        // Episode info
         Column(
             modifier = Modifier
                 .weight(1f)
                 .padding(end = 12.dp)
         ) {
             Text(
-                text = episode.title,
+                text = video.title,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -105,38 +99,38 @@ fun EpisodeItem(
                 lineHeight = 20.sp
             )
 
-            // Cache formatted metadata to eliminate per-frame allocations during scrolling
-            val metadata = remember(episode.channelTitle, episode.durationText, episode.releaseDateText) {
-                buildString {
-                    append(episode.channelTitle)
-                    if (episode.durationText.isNotBlank()) {
-                        append(" · ")
-                        append(episode.durationText)
-                    }
-                    if (episode.releaseDateText.isNotBlank()) {
-                        append("\n")
-                        append(episode.releaseDateText)
-                    }
-                }
+            val channelAndDuration = if (video.durationText.isNotBlank()) {
+                "${video.channelTitle} · ${video.durationText}"
+            } else {
+                video.channelTitle
             }
 
             Spacer(modifier = Modifier.height(3.dp))
 
-            // Channel info & relative upload date unified as 1 compact component with tight line height
             Text(
-                text = metadata,
+                text = channelAndDuration,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
+            if (video.releaseDateText.isNotBlank()) {
+                Text(
+                    text = video.releaseDateText,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
-        // Dual-action capsule pill (Play | Download)
         DualActionCapsule(
-            isDownloaded = episode.isDownloaded,
-            downloadProgress = episode.downloadProgress,
+            isDownloaded = video.isDownloaded,
+            downloadProgress = video.downloadProgress,
             onPlayClick = onPlayClick,
             onDownloadClick = onDownloadClick
         )
@@ -149,16 +143,15 @@ fun DualActionCapsule(
     downloadProgress: Float?,
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .height(44.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .clip(DualActionCapsuleShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Action: Play
         Box(
             modifier = Modifier
                 .width(44.dp)
@@ -174,7 +167,6 @@ fun DualActionCapsule(
             )
         }
 
-        // Vertical divider
         Box(
             modifier = Modifier
                 .width(1.dp)
@@ -182,7 +174,6 @@ fun DualActionCapsule(
                 .background(MaterialTheme.colorScheme.outlineVariant)
         )
 
-        // Right Action: Download
         Box(
             modifier = Modifier
                 .width(44.dp)

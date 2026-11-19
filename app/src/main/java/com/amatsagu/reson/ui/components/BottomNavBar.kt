@@ -25,7 +25,7 @@ import com.amatsagu.reson.model.ResonTab
 fun ResonBottomNavBar(
     selectedTab: ResonTab,
     onTabSelected: (ResonTab) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     NavigationBar(
         modifier = modifier,

@@ -27,7 +27,7 @@ private val ResonDarkColorScheme = darkColorScheme(
     outline = ResonPillDivider,
     surfaceContainer = ResonCardSurface,
     surfaceContainerHigh = ResonCardSurfaceVariant,
-    surfaceContainerHighest = ResonPillContainer
+    surfaceContainerHighest = ResonPillContainer,
 )
 
 private val ResonLightColorScheme = lightColorScheme(

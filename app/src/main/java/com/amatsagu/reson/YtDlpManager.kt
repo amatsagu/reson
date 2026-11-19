@@ -11,8 +11,8 @@ import com.yausername.youtubedl_android.YoutubeDLResponse
 import com.yausername.youtubedl_android.mapper.VideoInfo
 import com.yausername.ffmpeg.FFmpeg
 import com.amatsagu.reson.model.Channel
-import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.SearchResultItem
+import com.amatsagu.reson.model.Video
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,18 +27,17 @@ import kotlin.math.log10
 
 /**
  * State representing the lifecycle and health of yt-dlp.
- * In Go terms, think of this as an enum/tagged union representing current engine health.
  */
 sealed interface YtDlpState {
     data object Uninitialized : YtDlpState
     data object Initializing : YtDlpState
     data class Ready(val version: String, val statusMessage: String? = null) : YtDlpState
-    data class Updating(val currentVersion: String, val message: String = "Downloading latest yt-dlp...") : YtDlpState
+    data class Updating(val currentVersion: String, val message: String = "Downloading updates...") : YtDlpState
     data class Error(val message: String, val canRecover: Boolean = true) : YtDlpState
 }
 
 /**
- * Result wrapper for yt-dlp operations (like Go's `(result, error)` tuple).
+ * Result wrapper for engine operations.
  */
 sealed class Result<out T> {
     data class Success<T>(val data: T) : Result<T>()
@@ -146,6 +145,16 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         /**
+         * Cleans version string by removing any engine prefixes like "yt-dlp "
+         * so only clean semantic/date version numbers are displayed in the UI.
+         */
+        fun cleanVersion(raw: String?): String {
+            if (raw.isNullOrBlank()) return "Unknown"
+            val cleaned = raw.replace("(?i)yt-dlp\\s*".toRegex(), "").trim()
+            return cleaned.ifEmpty { raw.trim() }
+        }
+
+        /**
          * Computes similarity between search query and channel name/handle (0.0 to 1.0).
          * Normalizes alphanumeric text (ignoring spaces, case, and punctuation) to match YouTube's behavior,
          * so queries like "smug alana" match "SmugAlana", "mr beast" matches "MrBeast", etc.
@@ -204,7 +213,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         fun filterAndRankChannels(
             query: String,
             channels: List<Channel>,
-            videos: List<Episode>
+            videos: List<Video>
         ): List<Channel> {
             val scored = channels.mapNotNull { ch ->
                 // Channels with < 1000 subscribers are skipped unless their real @handle matches the query perfectly
@@ -239,7 +248,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
          * Each channel counts towards the maxTotal limit.
          */
         fun mergeSearchResults(
-            videos: List<Episode>,
+            videos: List<Video>,
             channels: List<Channel>,
             maxTotal: Int = 30
         ): List<SearchResultItem> {
@@ -309,7 +318,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
 
                 val version = getVersionName()
-                _state.value = YtDlpState.Ready(version = version, statusMessage = "yt-dlp is ready ($version)")
+                _state.value = YtDlpState.Ready(version = version, statusMessage = "Ready ($version)")
                 Log.i(TAG, "yt-dlp initialized successfully, version: $version")
                 true
             } catch (e: Throwable) {
@@ -381,8 +390,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 val newVersion = getVersionName()
 
                 val message = when (updateStatus) {
-                    UpdateStatus.DONE -> "Successfully updated yt-dlp from $currentVersion to $newVersion"
-                    UpdateStatus.ALREADY_UP_TO_DATE -> "yt-dlp is already up to date ($newVersion)"
+                    UpdateStatus.DONE -> "Successfully updated to $newVersion"
+                    UpdateStatus.ALREADY_UP_TO_DATE -> "Already up to date ($newVersion)"
                     null -> "Update status unknown. Current version: $newVersion"
                 }
 
@@ -406,7 +415,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Fetches metadata for a given YouTube URL (podcast episode, playlist, or video).
+     * Fetches metadata for a given YouTube URL or video.
      * If an extraction error occurs (which commonly happens when YouTube alters player APIs),
      * it can automatically trigger self-patching and retry once.
      */
@@ -450,12 +459,12 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     /**
      * Performs a fast search using yt-dlp with --flat-playlist and Android player client.
-     * Returns a list of parsed Episode items (up to maxResults).
+     * Returns a list of parsed Video items (up to maxResults).
      */
     suspend fun searchContent(
         query: String,
         maxResults: Int = 30
-    ): Result<List<com.amatsagu.reson.model.Episode>> = withContext(Dispatchers.IO) {
+    ): Result<List<Video>> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
 
@@ -471,38 +480,68 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 addOption("--dump-json")
                 addOption("--skip-download")
                 addOption("--no-warnings")
-                addOption("--extractor-args", "youtubetab:approximate_date;youtube:player_client=android")
+                addOption("--extractor-args", "youtubetab:approximate_date")
             }
 
             Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget)")
-            val response = YoutubeDL.getInstance().execute(request)
-            val episodes = mutableListOf<com.amatsagu.reson.model.Episode>()
+            val response = mutex.withLock {
+                YoutubeDL.getInstance().execute(request)
+            }
+            val videos = mutableListOf<Video>()
 
             for (line in response.out.lines()) {
                 val jsonLine = line.trim()
                 if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
                 try {
                     val json = org.json.JSONObject(jsonLine)
-                    val id = json.optString("id", "")
+                    val id = json.optCleanString("id")
                     if (id.isEmpty()) continue
 
-                    val title = json.optString("title", "Untitled")
-                    val uploader = json.optString("uploader").ifEmpty {
-                        json.optString("channel", "Unknown Channel")
+                    val title = json.optCleanString("title", "Untitled")
+                    val uploader = json.optCleanString("uploader").ifEmpty {
+                        json.optCleanString("channel").ifEmpty {
+                            json.optCleanString("uploader_id").ifEmpty {
+                                json.optCleanString("creator").ifEmpty {
+                                    json.optCleanString("channel_id").ifEmpty {
+                                        "Unknown Channel"
+                                    }
+                                }
+                            }
+                        }
                     }
                     val duration = json.optInt("duration", 0)
                     val timestamp = json.optLong("timestamp", 0L)
-                    val rawDate = json.optString("upload_date", "")
+                    val rawDate = json.optCleanString("upload_date")
                     val releaseDateText = formatRelativeDate(timestamp, rawDate)
 
-                    var thumb = json.optString("thumbnail", "")
-                    if (thumb.isEmpty() && id.isNotEmpty()) {
-                        thumb = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+                    var thumb = ""
+                    val thumbs = json.optJSONArray("thumbnails")
+                    if (thumbs != null && thumbs.length() > 0) {
+                        // Pick thumbnail closest to ~360px width for silky 120fps scrolling and optimal memory footprint
+                        for (i in 0 until thumbs.length()) {
+                            val tObj = thumbs.optJSONObject(i) ?: continue
+                            val w = tObj.optInt("width", 0)
+                            val u = tObj.optCleanString("url")
+                            if (u.isNotEmpty() && (w in 300..600)) {
+                                thumb = u
+                                break
+                            }
+                        }
+                        if (thumb.isEmpty()) {
+                            thumb = thumbs.optJSONObject(0)?.optCleanString("url") ?: ""
+                        }
+                    }
+                    if (thumb.isEmpty()) {
+                        thumb = if (id.isNotEmpty()) {
+                            "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+                        } else {
+                            json.optCleanString("thumbnail")
+                        }
                     }
                     val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
 
-                    episodes.add(
-                        com.amatsagu.reson.model.Episode(
+                    videos.add(
+                        Video(
                             id = id,
                             title = title,
                             channelTitle = uploader,
@@ -510,7 +549,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             durationText = formatDuration(duration),
                             releaseDateText = releaseDateText,
                             thumbnailUrl = thumb,
-                            webpageUrl = webpageUrl
+                            webpageUrl = webpageUrl,
                         )
                     )
                 } catch (parseEx: Exception) {
@@ -518,8 +557,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
             }
 
-            Log.i(TAG, "Search completed. Found ${episodes.size} episodes.")
-            Result.Success(episodes)
+            Log.i(TAG, "Search completed. Found ${videos.size} videos.")
+            Result.Success(videos)
         } catch (e: Throwable) {
             Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
             Result.Failure(e, e.message ?: "Failed to perform search")
@@ -550,7 +589,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
 
             Log.i(TAG, "Searching channels for '$trimmed'")
-            val response = YoutubeDL.getInstance().execute(request)
+            val response = mutex.withLock {
+                YoutubeDL.getInstance().execute(request)
+            }
             val channels = mutableListOf<Channel>()
 
             for (line in response.out.lines()) {
@@ -558,18 +599,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
                 try {
                     val json = org.json.JSONObject(jsonLine)
-                    val id = json.optString("id", "").ifEmpty {
-                        json.optString("channel_id", "")
+                    val id = json.optCleanString("id").ifEmpty {
+                        json.optCleanString("channel_id")
                     }
                     if (id.isEmpty()) continue
 
-                    val title = json.optString("title", "").ifEmpty {
-                        json.optString("channel", "")
+                    val title = json.optCleanString("title").ifEmpty {
+                        json.optCleanString("channel")
                     }
                     if (title.isEmpty()) continue
 
-                    val handle = json.optString("uploader_id", "").ifEmpty {
-                        json.optString("uploader", "")
+                    val handle = json.optCleanString("uploader_id").ifEmpty {
+                        json.optCleanString("uploader")
                     }
                     val subs = json.optLong("channel_follower_count", 0L)
                     val subsText = formatSubscriberCount(subs)
@@ -577,8 +618,19 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     var avatar = ""
                     val thumbs = json.optJSONArray("thumbnails")
                     if (thumbs != null && thumbs.length() > 0) {
-                        val lastThumb = thumbs.getJSONObject(thumbs.length() - 1)
-                        avatar = lastThumb.optString("url", "")
+                        // Pick avatar closest to ~88-176px for 48dp circle
+                        for (i in 0 until thumbs.length()) {
+                            val tObj = thumbs.optJSONObject(i) ?: continue
+                            val w = tObj.optInt("width", 0)
+                            val u = tObj.optCleanString("url")
+                            if (u.isNotEmpty() && (w in 88..250)) {
+                                avatar = u
+                                break
+                            }
+                        }
+                        if (avatar.isEmpty()) {
+                            avatar = thumbs.getJSONObject(0).optCleanString("url")
+                        }
                     }
                     if (avatar.startsWith("//")) {
                         avatar = "https:$avatar"
@@ -626,9 +678,17 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     private fun getVersionName(): String {
         return try {
-            YoutubeDL.getInstance().versionName(appContext) ?: "Unknown"
+            cleanVersion(YoutubeDL.getInstance().versionName(appContext))
         } catch (_: Exception) {
             "Unknown"
         }
     }
+}
+
+/**
+ * Safely extracts a trimmed non-"null" string from JSONObject.
+ */
+private fun org.json.JSONObject.optCleanString(key: String, fallback: String = ""): String {
+    val s = optString(key, fallback).trim()
+    return if (s.isEmpty() || s.equals("null", ignoreCase = true)) fallback else s
 }

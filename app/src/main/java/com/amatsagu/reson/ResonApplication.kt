@@ -13,11 +13,9 @@ import kotlinx.coroutines.launch
 
 /**
  * Main application class for Reson.
- * Equivalent to main() initialization before services start in a Go application.
  */
 class ResonApplication : Application(), ImageLoaderFactory {
 
-    // Application-wide coroutine scope that lives as long as the process
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun newImageLoader(): ImageLoader {
@@ -30,11 +28,11 @@ class ResonApplication : Application(), ImageLoaderFactory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(50L * 1024 * 1024) // 50MB disk cache
+                    .maxSizeBytes(50L * 1024 * 1024)
                     .build()
             }
-            .crossfade(false) // Instant image rendering to prevent jank/dropped frames during 120Hz scroll
-            .respectCacheHeaders(false) // Cache static YouTube thumbnails reliably
+            .crossfade(enable = false)
+            .respectCacheHeaders(enable = false)
             .build()
     }
 

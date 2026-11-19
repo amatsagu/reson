@@ -22,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,30 +35,31 @@ import coil.compose.AsyncImage
 import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Channel
 
+private val ChannelCardShape = RoundedCornerShape(16.dp)
+private val ChannelButtonShape = RoundedCornerShape(20.dp)
+
 /**
- * Material 3 Row representing a followable YouTube channel / creator in search results.
- * Shows official channel name, circular logo, subscriber count, and Follow/Following toggle button.
- * Flattened to a direct Row with surface background to avoid nested Card layout node overhead.
+ * Row representing a followable YouTube channel / creator in search results.
+ * Shows channel name, circular logo, subscriber count, and Follow/Following toggle button.
  */
 @Composable
 fun ChannelItem(
     channel: Channel,
     onFollowClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(ChannelCardShape)
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Circular channel logo / avatar
         if (channel.avatarUrl.isNotBlank()) {
             AsyncImage(
                 model = channel.avatarUrl,
-                contentDescription = channel.title,
+                contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(48.dp)
@@ -84,7 +84,6 @@ fun ChannelItem(
 
         Spacer(modifier = Modifier.width(14.dp))
 
-        // Channel name, and handle + subscriber count as a single compact two-line component
         Column(
             modifier = Modifier.weight(1f)
         ) {
@@ -97,26 +96,28 @@ fun ChannelItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            val details = remember(channel.handle, channel.subscriberCountText) {
-                buildString {
-                    if (channel.handle.isNotBlank()) {
-                        append(channel.handle)
-                    }
-                    if (channel.subscriberCountText.isNotBlank()) {
-                        if (isNotEmpty()) append("\n")
-                        append(channel.subscriberCountText)
-                    }
-                }
-            }
-
-            if (details.isNotBlank()) {
+            if (channel.handle.isNotBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = details,
+                    text = channel.handle,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (channel.subscriberCountText.isNotBlank()) {
+                if (channel.handle.isBlank()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                }
+                Text(
+                    text = channel.subscriberCountText,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -128,7 +129,7 @@ fun ChannelItem(
         if (channel.isFollowed) {
             Button(
                 onClick = onFollowClick,
-                shape = RoundedCornerShape(20.dp),
+                shape = ChannelButtonShape,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     contentColor = MaterialTheme.colorScheme.onSurface
@@ -151,7 +152,7 @@ fun ChannelItem(
         } else {
             Button(
                 onClick = onFollowClick,
-                shape = RoundedCornerShape(20.dp),
+                shape = ChannelButtonShape,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
