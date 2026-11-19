@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -33,22 +34,27 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Episode
+import kotlinx.coroutines.delay
 
 /**
  * Pill-shaped Search Bar with dynamic theming.
@@ -71,7 +77,7 @@ fun SearchPillBar(
     ) {
         Icon(
             imageVector = Icons.Default.Search,
-            contentDescription = "Search",
+            contentDescription = stringResource(R.string.search_content),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(22.dp)
         )
@@ -79,7 +85,7 @@ fun SearchPillBar(
         Spacer(modifier = Modifier.width(12.dp))
 
         Text(
-            text = query.ifEmpty { "Search content" },
+            text = query.ifEmpty { stringResource(R.string.search_content) },
             fontSize = 15.sp,
             color = if (query.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.weight(1f),
@@ -89,7 +95,7 @@ fun SearchPillBar(
 
         Icon(
             imageVector = Icons.Default.Mic,
-            contentDescription = "Voice search",
+            contentDescription = stringResource(R.string.action_voice_search),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp)
         )
@@ -97,8 +103,9 @@ fun SearchPillBar(
 }
 
 /**
- * Fullscreen Interactive Search Overlay with dynamic theming.
- * Includes instant autocomplete suggestions and top 30 yt-dlp search results.
+ * Fullscreen Interactive Search Overlay with unified pill style.
+ * Back arrow and search button are integrated inside the search bar pill.
+ * Automatically requests focus and opens the keyboard upon opening.
  */
 @Composable
 fun SearchOverlay(
@@ -110,13 +117,23 @@ fun SearchOverlay(
     suggestions: List<String>,
     isSearching: Boolean,
     searchResults: List<Episode>,
-    errorMessage: String?,
+    @androidx.annotation.StringRes errorRes: Int? = null,
+    errorArg: String? = null,
     onPlayEpisode: (Episode) -> Unit,
     onDownloadEpisode: (Episode) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+
+    // Instantly request focus and show keyboard when overlay becomes visible
+    LaunchedEffect(visible) {
+        if (visible) {
+            delay(100)
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
 
     AnimatedVisibility(
         visible = visible,
@@ -129,79 +146,95 @@ fun SearchOverlay(
                 .background(MaterialTheme.colorScheme.background)
                 .statusBarsPadding()
         ) {
-            // Top input row
+            // Unified Pill Search Bar (Back button, text field, clear, and search icon inside the pill)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(start = 4.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = {
-                    keyboardController?.hide()
-                    onDismiss()
-                }) {
+                // Back arrow INSIDE search bar pill
+                IconButton(
+                    onClick = {
+                        keyboardController?.hide()
+                        onDismiss()
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        contentDescription = stringResource(R.string.action_back),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
-                OutlinedTextField(
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Text field inside the pill
+                BasicTextField(
                     value = query,
                     onValueChange = onQueryChange,
                     modifier = Modifier
                         .weight(1f)
-                        .height(52.dp),
-                    shape = RoundedCornerShape(26.dp),
-                    placeholder = {
-                        Text(
-                            text = "Search content or paste link",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
+                        .focusRequester(focusRequester),
                     singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        focusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        cursorColor = MaterialTheme.colorScheme.primary
+                    textStyle = TextStyle(
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface
                     ),
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { onQueryChange("") }) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    },
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
                         keyboardController?.hide()
-                        focusManager.clearFocus()
                         onSearch(query)
-                    })
+                    }),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) {
+                                Text(
+                                    text = stringResource(R.string.search_content),
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
                 )
 
-                Spacer(modifier = Modifier.width(4.dp))
+                // Clear ('X') button if query is not empty
+                if (query.isNotEmpty()) {
+                    IconButton(
+                        onClick = { onQueryChange("") },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.action_clear),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
 
-                IconButton(onClick = {
-                    keyboardController?.hide()
-                    focusManager.clearFocus()
-                    onSearch(query)
-                }) {
+                // Search icon INSIDE search bar pill
+                IconButton(
+                    onClick = {
+                        keyboardController?.hide()
+                        onSearch(query)
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
                     Icon(
                         imageVector = Icons.Default.Search,
-                        contentDescription = "Submit search",
-                        tint = MaterialTheme.colorScheme.primary
+                        contentDescription = stringResource(R.string.action_submit_search),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -226,14 +259,19 @@ fun SearchOverlay(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Searching YouTube podcasts...",
+                                text = stringResource(R.string.search_searching),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp
                             )
                         }
                     }
 
-                    errorMessage != null -> {
+                    errorRes != null -> {
+                        val errorText = if (errorArg != null) {
+                            stringResource(errorRes, errorArg)
+                        } else {
+                            stringResource(errorRes)
+                        }
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -242,7 +280,7 @@ fun SearchOverlay(
                             verticalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = errorMessage,
+                                text = errorText,
                                 color = MaterialTheme.colorScheme.error,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
@@ -258,7 +296,7 @@ fun SearchOverlay(
                         ) {
                             item {
                                 Text(
-                                    text = "Results (${searchResults.size})",
+                                    text = stringResource(R.string.search_results_count, searchResults.size),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -287,7 +325,6 @@ fun SearchOverlay(
                                         .fillMaxWidth()
                                         .clickable {
                                             keyboardController?.hide()
-                                            focusManager.clearFocus()
                                             onQueryChange(suggestion)
                                             onSearch(suggestion)
                                         }
@@ -309,7 +346,7 @@ fun SearchOverlay(
                                     )
                                     Icon(
                                         imageVector = Icons.Default.NorthWest,
-                                        contentDescription = "Use suggestion",
+                                        contentDescription = stringResource(R.string.action_use_suggestion),
                                         tint = MaterialTheme.colorScheme.outline,
                                         modifier = Modifier.size(16.dp)
                                     )
@@ -326,7 +363,7 @@ fun SearchOverlay(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "Search podcasts, episodes or paste links",
+                                text = stringResource(R.string.search_empty_hint),
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

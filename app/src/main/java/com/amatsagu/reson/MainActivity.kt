@@ -27,12 +27,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amatsagu.reson.model.Episode
 import com.amatsagu.reson.model.ResonTab
+import com.amatsagu.reson.ui.components.AdaptiveSectionHeader
 import com.amatsagu.reson.ui.components.AppLoadingOverlay
 import com.amatsagu.reson.ui.components.ContinueSection
 import com.amatsagu.reson.ui.components.EpisodeItem
@@ -124,15 +126,22 @@ fun ResonApp(viewModel: MainViewModel) {
             suggestions = uiState.suggestions,
             isSearching = uiState.isSearching,
             searchResults = uiState.searchResults,
-            errorMessage = uiState.searchError,
+            errorRes = uiState.searchErrorRes,
+            errorArg = uiState.searchErrorArg,
             onPlayEpisode = { viewModel.playEpisode(it) },
             onDownloadEpisode = { viewModel.downloadEpisode(it) }
         )
 
         // Startup App Loading Overlay with Bypass
+        val loadingStatus = if (uiState.loadingStatusArg != null) {
+            stringResource(uiState.loadingStatusRes, uiState.loadingStatusArg!!)
+        } else {
+            stringResource(uiState.loadingStatusRes)
+        }
+
         AppLoadingOverlay(
             visible = uiState.isAppLoading,
-            statusText = uiState.loadingStatusText,
+            statusText = loadingStatus,
             onBypass = { viewModel.bypassLoading() }
         )
     }
@@ -171,13 +180,11 @@ fun FeedScreen(
             )
         }
 
-        // Episodes header
+        // Recommended content header (adapts to "Recommended" when width is constrained)
         item {
-            Text(
-                text = "Episodes",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+            AdaptiveSectionHeader(
+                fullTitle = stringResource(R.string.section_recommended_content),
+                shortTitle = stringResource(R.string.section_recommended_short),
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
@@ -206,7 +213,7 @@ fun ChannelsScreen(
             .padding(16.dp)
     ) {
         Text(
-            text = "Channels",
+            text = stringResource(R.string.channels_title),
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
@@ -215,7 +222,7 @@ fun ChannelsScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Recent uploads from channels you follow will appear here. Stored offline in SQLite.",
+            text = stringResource(R.string.channels_empty_description),
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             lineHeight = 20.sp
@@ -237,7 +244,7 @@ fun LibraryScreen(
             .padding(16.dp)
     ) {
         Text(
-            text = "Library & Maintenance",
+            text = stringResource(R.string.library_title),
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
@@ -251,7 +258,7 @@ fun LibraryScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "yt-dlp Engine Status",
+                    text = stringResource(R.string.library_engine_status),
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -260,11 +267,11 @@ fun LibraryScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 val statusText = when (ytDlpState) {
-                    is YtDlpState.Ready -> "Ready (${ytDlpState.version})"
-                    is YtDlpState.Updating -> "Updating..."
-                    is YtDlpState.Initializing -> "Initializing..."
-                    is YtDlpState.Error -> "Error: ${ytDlpState.message}"
-                    is YtDlpState.Uninitialized -> "Uninitialized"
+                    is YtDlpState.Ready -> stringResource(R.string.status_ready, ytDlpState.version)
+                    is YtDlpState.Updating -> stringResource(R.string.status_updating)
+                    is YtDlpState.Initializing -> stringResource(R.string.status_initializing)
+                    is YtDlpState.Error -> stringResource(R.string.status_error, ytDlpState.message)
+                    is YtDlpState.Uninitialized -> stringResource(R.string.status_uninitialized)
                 }
 
                 Text(
@@ -277,10 +284,10 @@ fun LibraryScreen(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onCheckUpdate) {
-                        Text("Check Update")
+                        Text(stringResource(R.string.action_check_update))
                     }
                     OutlinedButton(onClick = onSelfRepair) {
-                        Text("Self-Repair")
+                        Text(stringResource(R.string.action_self_repair))
                     }
                 }
             }
@@ -305,6 +312,7 @@ fun ResonFeedPreview() {
                             title = "Reson\nEpisode 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
+                            releaseDateText = "27.11.26",
                             playbackProgress = 0.65f
                         ),
                         Episode(
@@ -312,6 +320,7 @@ fun ResonFeedPreview() {
                             title = "Reson\nEpisode 4",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
+                            releaseDateText = "27.11.26",
                             playbackProgress = 0.35f
                         )
                     ),
@@ -320,20 +329,23 @@ fun ResonFeedPreview() {
                             id = "e5",
                             title = "Reson\nEpisode 5",
                             channelTitle = "Channel Reson",
-                            durationText = "45m"
+                            durationText = "45m",
+                            releaseDateText = "27.11.26"
                         ),
                         Episode(
                             id = "e5_2",
                             title = "Reson\nEpisode 5",
                             channelTitle = "Channel Reson",
                             durationText = "45m",
+                            releaseDateText = "27.11.26",
                             downloadProgress = 0.75f
                         ),
                         Episode(
                             id = "e3",
                             title = "Reson\nEpisode • 3",
                             channelTitle = "Channel Reson",
-                            durationText = "45m"
+                            durationText = "45m",
+                            releaseDateText = "27.11.26"
                         )
                     )
                 ),

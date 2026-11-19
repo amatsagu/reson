@@ -272,6 +272,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         json.optString("channel", "Unknown Channel")
                     }
                     val duration = json.optInt("duration", 0)
+                    val rawDate = json.optString("upload_date").ifEmpty {
+                        val ts = json.optLong("timestamp", 0L)
+                        if (ts > 0) {
+                            java.text.SimpleDateFormat("dd.MM.yy", java.util.Locale.getDefault())
+                                .format(java.util.Date(ts * 1000L))
+                        } else ""
+                    }
+                    val releaseDateText = formatReleaseDate(rawDate)
+
                     var thumb = json.optString("thumbnail", "")
                     if (thumb.isEmpty() && id.isNotEmpty()) {
                         thumb = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
@@ -285,6 +294,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             channelTitle = uploader,
                             durationSeconds = duration,
                             durationText = formatDuration(duration),
+                            releaseDateText = releaseDateText,
                             thumbnailUrl = thumb,
                             webpageUrl = webpageUrl
                         )
@@ -300,6 +310,17 @@ class YtDlpManager private constructor(private val appContext: Context) {
             Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
             Result.Failure(e, e.message ?: "Failed to perform search")
         }
+    }
+
+    private fun formatReleaseDate(rawDate: String): String {
+        val trimmed = rawDate.trim()
+        if (trimmed.length == 8 && trimmed.all { it.isDigit() }) { // YYYYMMDD
+            val y = trimmed.substring(2, 4)
+            val m = trimmed.substring(4, 6)
+            val d = trimmed.substring(6, 8)
+            return "$d.$m.$y"
+        }
+        return trimmed
     }
 
     private fun formatDuration(seconds: Int): String {

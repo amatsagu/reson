@@ -1,6 +1,7 @@
 package com.amatsagu.reson
 
 import android.app.Application
+import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amatsagu.reson.data.SearchSuggestClient
@@ -19,12 +20,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Complete UI State for Reson application.
+ * Complete UI State for Reson application with localized string resource references.
  */
 data class MainUiState(
     // App startup loading overlay
     val isAppLoading: Boolean = true,
-    val loadingStatusText: String = "Starting podcast engine...",
+    @StringRes val loadingStatusRes: Int = R.string.loading_starting_engine,
+    val loadingStatusArg: String? = null,
 
     // Navigation
     val selectedTab: ResonTab = ResonTab.Feed,
@@ -35,7 +37,8 @@ data class MainUiState(
     val suggestions: List<String> = emptyList(),
     val searchResults: List<Episode> = emptyList(),
     val isSearching: Boolean = false,
-    val searchError: String? = null,
+    @StringRes val searchErrorRes: Int? = null,
+    val searchErrorArg: String? = null,
 
     // Feed / Home Content
     val continueEpisodes: List<Episode> = emptyList(),
@@ -69,21 +72,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ytDlpState.collect { state ->
                 when (state) {
                     is YtDlpState.Uninitialized -> {
-                        _uiState.update { it.copy(loadingStatusText = "Connecting to engine...") }
+                        _uiState.update {
+                            it.copy(
+                                loadingStatusRes = R.string.loading_connecting_engine,
+                                loadingStatusArg = null
+                            )
+                        }
                     }
                     is YtDlpState.Initializing -> {
-                        _uiState.update { it.copy(loadingStatusText = "Initializing yt-dlp runtime...") }
+                        _uiState.update {
+                            it.copy(
+                                loadingStatusRes = R.string.loading_initializing_runtime,
+                                loadingStatusArg = null
+                            )
+                        }
                         addLog("yt-dlp initializing runtime...")
                     }
                     is YtDlpState.Updating -> {
-                        _uiState.update { it.copy(loadingStatusText = "Updating yt-dlp to latest upstream...") }
+                        _uiState.update {
+                            it.copy(
+                                loadingStatusRes = R.string.loading_updating_upstream,
+                                loadingStatusArg = null
+                            )
+                        }
                         addLog("yt-dlp updating to latest upstream release...")
                     }
                     is YtDlpState.Ready -> {
                         addLog("yt-dlp is ready (version: ${state.version})")
                         _uiState.update {
                             it.copy(
-                                loadingStatusText = "yt-dlp ready (${state.version})"
+                                loadingStatusRes = R.string.status_ready,
+                                loadingStatusArg = state.version
                             )
                         }
                         // Auto-dismiss loading screen after a short moment when ready
@@ -94,7 +113,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         addLog("yt-dlp error: ${state.message}")
                         _uiState.update {
                             it.copy(
-                                loadingStatusText = "Offline mode (Engine error: ${state.message})",
+                                loadingStatusRes = R.string.status_offline_mode,
+                                loadingStatusArg = state.message,
                                 isAppLoading = false
                             )
                         }
@@ -121,14 +141,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closeSearch() {
-        _uiState.update { it.copy(isSearchActive = false, suggestions = emptyList()) }
+        _uiState.update {
+            it.copy(
+                isSearchActive = false,
+                suggestions = emptyList(),
+                searchErrorRes = null,
+                searchErrorArg = null
+            )
+        }
     }
 
     /**
      * Handles typing in search bar with debounced autocomplete suggestions.
      */
     fun onSearchQueryChange(newQuery: String) {
-        _uiState.update { it.copy(searchQuery = newQuery, searchError = null) }
+        _uiState.update {
+            it.copy(
+                searchQuery = newQuery,
+                searchErrorRes = null,
+                searchErrorArg = null
+            )
+        }
 
         suggestJob?.cancel()
         if (newQuery.trim().length >= 2) {
@@ -155,7 +188,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 searchQuery = trimmed,
                 isSearching = true,
                 suggestions = emptyList(),
-                searchError = null
+                searchErrorRes = null,
+                searchErrorArg = null
             )
         }
 
@@ -169,7 +203,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         it.copy(
                             isSearching = false,
                             searchResults = result.data,
-                            searchError = if (result.data.isEmpty()) "No results found for '$trimmed'" else null
+                            searchErrorRes = if (result.data.isEmpty()) R.string.search_no_results else null,
+                            searchErrorArg = if (result.data.isEmpty()) trimmed else null
                         )
                     }
                 }
@@ -178,7 +213,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update {
                         it.copy(
                             isSearching = false,
-                            searchError = "Search failed: ${result.message}"
+                            searchErrorRes = R.string.search_failed,
+                            searchErrorArg = result.message
                         )
                     }
                 }
@@ -204,7 +240,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun downloadEpisode(episode: Episode) {
         addLog("Download requested for: ${episode.title}")
-        // Mark as simulated downloading or start download task
         _uiState.update { current ->
             val updatedFeed = current.feedEpisodes.map {
                 if (it.id == episode.id) it.copy(downloadProgress = 0.5f) else it
@@ -258,6 +293,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
+                releaseDateText = "27.11.26",
                 playbackProgress = 0.65f
             ),
             Episode(
@@ -266,6 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
+                releaseDateText = "27.11.26",
                 playbackProgress = 0.35f
             )
         )
@@ -277,6 +314,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
+                releaseDateText = "27.11.26",
                 isDownloaded = false
             ),
             Episode(
@@ -285,6 +323,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
+                releaseDateText = "27.11.26",
                 downloadProgress = 0.75f
             ),
             Episode(
@@ -293,6 +332,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "45m",
                 durationSeconds = 2700,
+                releaseDateText = "27.11.26",
                 isDownloaded = false
             ),
             Episode(
@@ -301,6 +341,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 channelTitle = "Channel Reson",
                 durationText = "52m",
                 durationSeconds = 3120,
+                releaseDateText = "27.11.26",
                 isDownloaded = true
             )
         )

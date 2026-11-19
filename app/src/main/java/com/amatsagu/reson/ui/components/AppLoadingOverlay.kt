@@ -26,9 +26,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.amatsagu.reson.R
 
 /**
  * Startup loading overlay for initializing yt-dlp and checking updates.
@@ -60,7 +62,7 @@ fun AppLoadingOverlay(
                 verticalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = "Reson",
+                    text = stringResource(R.string.app_name),
                     fontSize = 36.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -70,7 +72,7 @@ fun AppLoadingOverlay(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Podcast Engine",
+                    text = stringResource(R.string.podcast_engine),
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -104,11 +106,11 @@ fun AppLoadingOverlay(
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
-                    Text(text = "Continue Offline / Skip", fontSize = 13.sp)
+                    Text(text = stringResource(R.string.action_skip_offline), fontSize = 13.sp)
                     Spacer(modifier = Modifier.size(6.dp))
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "Skip",
+                        contentDescription = stringResource(R.string.action_skip),
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )

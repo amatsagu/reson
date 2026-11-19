@@ -25,11 +25,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Episode
 
 /**
@@ -72,7 +74,7 @@ fun MiniPlayerBar(
                     )
                 } else {
                     Text(
-                        text = "Reson",
+                        text = stringResource(R.string.app_name),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -94,8 +96,20 @@ fun MiniPlayerBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                val subtitle = buildString {
+                    append(episode.channelTitle)
+                    if (episode.durationText.isNotBlank()) {
+                        append(" · ")
+                        append(episode.durationText)
+                    }
+                    if (episode.releaseDateText.isNotBlank()) {
+                        append(" · ")
+                        append(episode.releaseDateText)
+                    }
+                }
+
                 Text(
-                    text = "${episode.channelTitle} · ${episode.durationText}",
+                    text = subtitle,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -107,21 +121,20 @@ fun MiniPlayerBar(
             IconButton(onClick = onPlayPauseClick) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    contentDescription = stringResource(if (isPlaying) R.string.action_pause else R.string.action_play),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(26.dp)
                 )
             }
         }
 
-        // Bottom progress line
-        LinearProgressIndicator(
-            progress = { episode.playbackProgress.coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(2.dp),
+        // Clean bottom progress line without thumb dot
+        ResonProgressBar(
+            progress = episode.playbackProgress,
+            height = 2.dp,
             color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }

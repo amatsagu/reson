@@ -13,12 +13,13 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amatsagu.reson.model.ResonTab
 
 /**
- * Bottom navigation bar with dynamic system colors (Feed, Channels, Library).
+ * Bottom navigation bar with dynamic system colors and localized tab titles.
  */
 @Composable
 fun ResonBottomNavBar(
@@ -38,6 +39,7 @@ fun ResonBottomNavBar(
                 ResonTab.Channels -> Icons.Default.Group
                 ResonTab.Library -> Icons.Default.VideoLibrary
             }
+            val title = stringResource(tab.titleRes)
 
             NavigationBarItem(
                 selected = isSelected,
@@ -45,13 +47,13 @@ fun ResonBottomNavBar(
                 icon = {
                     Icon(
                         imageVector = icon,
-                        contentDescription = tab.label,
+                        contentDescription = title,
                         modifier = Modifier.size(22.dp)
                     )
                 },
                 label = {
                     Text(
-                        text = tab.label,
+                        text = title,
                         fontSize = 11.sp
                     )
                 },

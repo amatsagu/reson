@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,15 +30,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Episode
 
 /**
- * "Continue" section with horizontal cards matching the design screenshot.
+ * "Continue listening" section with horizontal cards matching the design screenshot.
+ * Uses smart adaptive header that shortens to "Continue" when width is constrained.
  */
 @Composable
 fun ContinueSection(
@@ -50,11 +52,9 @@ fun ContinueSection(
     if (episodes.isEmpty()) return
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = "Continue",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+        AdaptiveSectionHeader(
+            fullTitle = stringResource(R.string.section_continue_listening),
+            shortTitle = stringResource(R.string.section_continue_short),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
@@ -109,7 +109,7 @@ fun ContinueCard(
                     )
                 } else {
                     Text(
-                        text = "Reson",
+                        text = stringResource(R.string.app_name),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -137,8 +137,21 @@ fun ContinueCard(
                         lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(2.dp))
+
+                    val subtitle = buildString {
+                        append(episode.channelTitle)
+                        if (episode.durationText.isNotBlank()) {
+                            append(" · ")
+                            append(episode.durationText)
+                        }
+                        if (episode.releaseDateText.isNotBlank()) {
+                            append(" · ")
+                            append(episode.releaseDateText)
+                        }
+                    }
+
                     Text(
-                        text = "${episode.channelTitle} · ${episode.durationText}",
+                        text = subtitle,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -146,15 +159,13 @@ fun ContinueCard(
                     )
                 }
 
-                // Progress Bar
-                LinearProgressIndicator(
-                    progress = { episode.playbackProgress.coerceIn(0f, 1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp)),
+                // Clean Progress Bar with no weird dot at the end
+                ResonProgressBar(
+                    progress = episode.playbackProgress,
+                    height = 4.dp,
                     color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
@@ -171,7 +182,7 @@ fun ContinueCard(
             ) {
                 Icon(
                     imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Play",
+                    contentDescription = stringResource(R.string.action_play),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp)
                 )

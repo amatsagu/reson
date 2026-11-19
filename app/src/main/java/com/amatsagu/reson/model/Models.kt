@@ -1,5 +1,8 @@
 package com.amatsagu.reson.model
 
+import androidx.annotation.StringRes
+import com.amatsagu.reson.R
+
 /**
  * Representation of a podcast episode / video item.
  * In Go terms, this is our core domain struct.
@@ -10,6 +13,7 @@ data class Episode(
     val channelTitle: String,
     val durationText: String,
     val durationSeconds: Int = 0,
+    val releaseDateText: String = "",
     val thumbnailUrl: String = "",
     val webpageUrl: String = "https://www.youtube.com/watch?v=$id",
     val playbackProgress: Float = 0f,
@@ -18,10 +22,10 @@ data class Episode(
 )
 
 /**
- * Bottom navigation destinations.
+ * Bottom navigation destinations with localized string resource IDs.
  */
-enum class ResonTab(val label: String) {
-    Feed("Feed"),
-    Channels("Channels"),
-    Library("Library")
+enum class ResonTab(@StringRes val titleRes: Int) {
+    Feed(R.string.tab_feed),
+    Channels(R.string.tab_channels),
+    Library(R.string.tab_library)
 }

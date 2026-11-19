@@ -26,11 +26,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Episode
 
 /**
@@ -69,7 +71,7 @@ fun EpisodeItem(
                 )
             } else {
                 Text(
-                    text = "Reson",
+                    text = stringResource(R.string.app_name),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -102,6 +104,10 @@ fun EpisodeItem(
                 if (episode.durationText.isNotBlank()) {
                     append(" · ")
                     append(episode.durationText)
+                }
+                if (episode.releaseDateText.isNotBlank()) {
+                    append(" · ")
+                    append(episode.releaseDateText)
                 }
             }
 
@@ -149,7 +155,7 @@ fun DualActionCapsule(
         ) {
             Icon(
                 imageVector = Icons.Default.PlayArrow,
-                contentDescription = "Play",
+                contentDescription = stringResource(R.string.action_play),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp)
             )
@@ -184,7 +190,7 @@ fun DualActionCapsule(
                 isDownloaded -> {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = "Downloaded",
+                        contentDescription = stringResource(R.string.action_downloaded),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -192,7 +198,7 @@ fun DualActionCapsule(
                 else -> {
                     Icon(
                         imageVector = Icons.Default.FileDownload,
-                        contentDescription = "Download",
+                        contentDescription = stringResource(R.string.action_download),
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(18.dp)
                     )
