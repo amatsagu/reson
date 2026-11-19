@@ -210,7 +210,7 @@ fun SearchOverlay(
                     }
                 )
 
-                // Clear ('X') button if query is not empty
+                // When text is typed, replace the search icon with the 'X' close/clear icon
                 if (query.isNotEmpty()) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -221,26 +221,26 @@ fun SearchOverlay(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = ripple(bounded = false, radius = 18.dp)
-                            ) { onQueryChange("") }
+                            ) {
+                                onQueryChange("")
+                            }
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = stringResource(R.string.action_submit_search),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = false, radius = 18.dp)
+                            ) {
+                                keyboardController?.hide()
+                                onSearch(query)
+                            }
+                    )
                 }
-
-                // Search icon INSIDE search bar pill - onSurfaceVariant tint (white/gray/black, NOT primary colored!)
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = stringResource(R.string.action_submit_search),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(bounded = false, radius = 18.dp)
-                        ) {
-                            keyboardController?.hide()
-                            onSearch(query)
-                        }
-                )
             }
 
             // Body: Loading, Suggestions, or Results
