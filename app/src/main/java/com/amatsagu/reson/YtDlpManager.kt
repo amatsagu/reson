@@ -229,6 +229,91 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
     }
 
+    /**
+     * Performs a fast search using yt-dlp with --flat-playlist and Android player client.
+     * Returns a list of parsed Episode items (up to maxResults).
+     */
+    suspend fun searchContent(
+        query: String,
+        maxResults: Int = 30
+    ): Result<List<com.amatsagu.reson.model.Episode>> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
+
+        try {
+            ensureReady()
+            val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
+                    trimmed.startsWith("https://", ignoreCase = true)
+
+            val searchTarget = if (isDirectUrl) trimmed else "ytsearch$maxResults:$trimmed"
+
+            val request = YoutubeDLRequest(searchTarget).apply {
+                addOption("--flat-playlist")
+                addOption("--dump-json")
+                addOption("--skip-download")
+                addOption("--no-warnings")
+                addOption("--extractor-args", "youtube:player_client=android")
+            }
+
+            Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget)")
+            val response = YoutubeDL.getInstance().execute(request)
+            val episodes = mutableListOf<com.amatsagu.reson.model.Episode>()
+
+            for (line in response.out.lines()) {
+                val jsonLine = line.trim()
+                if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
+                try {
+                    val json = org.json.JSONObject(jsonLine)
+                    val id = json.optString("id", "")
+                    if (id.isEmpty()) continue
+
+                    val title = json.optString("title", "Untitled")
+                    val uploader = json.optString("uploader").ifEmpty {
+                        json.optString("channel", "Unknown Channel")
+                    }
+                    val duration = json.optInt("duration", 0)
+                    var thumb = json.optString("thumbnail", "")
+                    if (thumb.isEmpty() && id.isNotEmpty()) {
+                        thumb = "https://i.ytimg.com/vi/$id/hqdefault.jpg"
+                    }
+                    val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
+
+                    episodes.add(
+                        com.amatsagu.reson.model.Episode(
+                            id = id,
+                            title = title,
+                            channelTitle = uploader,
+                            durationSeconds = duration,
+                            durationText = formatDuration(duration),
+                            thumbnailUrl = thumb,
+                            webpageUrl = webpageUrl
+                        )
+                    )
+                } catch (parseEx: Exception) {
+                    Log.d(TAG, "Skipping line in search output: ${parseEx.message}")
+                }
+            }
+
+            Log.i(TAG, "Search completed. Found ${episodes.size} episodes.")
+            Result.Success(episodes)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
+            Result.Failure(e, e.message ?: "Failed to perform search")
+        }
+    }
+
+    private fun formatDuration(seconds: Int): String {
+        if (seconds <= 0) return "Unknown"
+        val hours = seconds / 3600
+        val minutes = (seconds % 3600) / 60
+        val secs = seconds % 60
+        return when {
+            hours > 0 -> "${hours}h ${minutes}m"
+            minutes > 0 -> "${minutes}m"
+            else -> "${secs}s"
+        }
+    }
+
     private fun ensureReady() {
         if (_state.value !is YtDlpState.Ready) {
             throw IllegalStateException("yt-dlp is not ready. Current state: ${_state.value}")

@@ -29,4 +29,18 @@ class YtDlpManagerTest {
         val errorState = YtDlpState.Error(message = "Corrupted binaries", canRecover = true)
         assertTrue(errorState.canRecover)
     }
+
+    @Test
+    fun testEpisode_creationAndDefaults() {
+        val episode = com.amatsagu.reson.model.Episode(
+            id = "test_123",
+            title = "Test Episode",
+            channelTitle = "Test Channel",
+            durationText = "45m",
+            durationSeconds = 2700
+        )
+        assertEquals("test_123", episode.id)
+        assertEquals("https://www.youtube.com/watch?v=test_123", episode.webpageUrl)
+        assertEquals(0f, episode.playbackProgress, 0.001f)
+    }
 }
