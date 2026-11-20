@@ -22,7 +22,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.TravelExplore
@@ -34,6 +36,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -159,6 +163,7 @@ fun ResonApp(viewModel: MainViewModel) {
                             isFeedLoadingMore = uiState.isFeedLoadingMore,
                             onLoadMore = { viewModel.loadMoreFeedVideos() },
                             onLoadMoreContinue = { viewModel.loadMoreContinueVideos() },
+                            onRefresh = { viewModel.refreshFeed() },
                             contentPadding = innerPadding
                         )
                     }
@@ -178,6 +183,7 @@ fun ResonApp(viewModel: MainViewModel) {
                             onDownloadVideo = { viewModel.downloadVideo(it) },
                             onLoadMore = { viewModel.loadMoreChannelVideos() },
                             onSearchClick = { viewModel.openSearch() },
+                            onRefresh = { viewModel.refreshChannelsSection() },
                             queuedDownloadIds = uiState.queuedDownloadIds,
                             downloadingProgressMap = uiState.downloadingProgressMap,
                             contentPadding = innerPadding
@@ -263,6 +269,7 @@ fun ResonApp(viewModel: MainViewModel) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(
     uiState: MainUiState,
@@ -273,6 +280,7 @@ fun FeedScreen(
     isFeedLoadingMore: Boolean,
     onLoadMore: () -> Unit,
     onLoadMoreContinue: () -> Unit = {},
+    onRefresh: () -> Unit = {},
     contentPadding: PaddingValues,
 ) {
     val hasContent = uiState.continueVideos.isNotEmpty() || (showRecommended && uiState.feedVideos.isNotEmpty())
@@ -309,101 +317,105 @@ fun FeedScreen(
             )
         }
 
-        if (!hasContent) {
-            if (!showRecommended && uiState.continueVideos.isEmpty()) {
-                // Empty state when user disabled recommendations and has no continue listening items
-                RecommendationsDisabledFeedState(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 32.dp)
-                )
-            } else {
-                // Friendly centered empty state encouraging user to search
-                EmptyFeedState(
-                    onSearchClick = onSearchClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 32.dp)
-                )
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                if (uiState.continueVideos.isNotEmpty()) {
-                    item(key = "continue_section", contentType = "continue") {
-                        ContinueSection(
-                            videos = uiState.continueVideos,
-                            currentPlayingVideoId = uiState.currentPlayingVideo?.id,
-                            isPlaybackActive = uiState.isPlaying,
-                            isAudioBuffering = uiState.isAudioBuffering,
-                            onPlayClick = onPlayVideo,
-                            onLoadMore = onLoadMoreContinue,
-                            isContinueLoadingMore = uiState.isContinueLoadingMore
-                        )
-                    }
+        PullToRefreshBox(
+            isRefreshing = uiState.isFeedRefreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            if (!hasContent) {
+                if (!showRecommended && uiState.continueVideos.isEmpty()) {
+                    // Empty state when user disabled recommendations and has no continue listening items
+                    RecommendationsDisabledFeedState(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 32.dp)
+                    )
+                } else {
+                    // Friendly centered empty state encouraging user to search
+                    EmptyFeedState(
+                        onSearchClick = onSearchClick,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 32.dp)
+                    )
                 }
-
-                if (showRecommended && uiState.feedVideos.isNotEmpty()) {
-                    item(key = "recommended_header", contentType = "header") {
-                        AdaptiveSectionHeader(
-                            fullTitle = stringResource(R.string.section_recommended_content),
-                            shortTitle = stringResource(R.string.section_recommended_short),
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                    }
-
-                    items(
-                        items = uiState.feedVideos,
-                        key = { it.id },
-                        contentType = { "feed_video" }
-                    ) { video ->
-                        val isPlaying = video.id == uiState.currentPlayingVideo?.id && uiState.isPlaying
-                        val isBuffering = video.id == uiState.currentPlayingVideo?.id && uiState.isAudioBuffering
-                        val isQueued = video.id in uiState.queuedDownloadIds || video.isDownloadQueued
-                        val activeProgress = uiState.downloadingProgressMap[video.id] ?: video.downloadProgress
-                        VideoItem(
-                            video = video,
-                            isPlaying = isPlaying,
-                            isBuffering = isBuffering,
-                            isQueued = isQueued,
-                            downloadProgress = activeProgress,
-                            onPlayClick = { onPlayVideo(video) },
-                            onDownloadClick = { onDownloadVideo(video) },
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                    }
-
-                    if (isFeedLoadingMore) {
-                        item(key = "feed_loading_more_indicator", contentType = "loading_spinner") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    strokeWidth = 2.5.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (uiState.continueVideos.isNotEmpty()) {
+                        item(key = "continue_section", contentType = "continue") {
+                            ContinueSection(
+                                videos = uiState.continueVideos,
+                                currentPlayingVideoId = uiState.currentPlayingVideo?.id,
+                                isPlaybackActive = uiState.isPlaying,
+                                isAudioBuffering = uiState.isAudioBuffering,
+                                onPlayClick = onPlayVideo,
+                                onLoadMore = onLoadMoreContinue,
+                                isContinueLoadingMore = uiState.isContinueLoadingMore
+                            )
                         }
                     }
-                } else if (!showRecommended) {
-                    item(key = "recommendations_disabled_message") {
-                        RecommendationsDisabledFeedState(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 32.dp, vertical = 24.dp)
-                        )
+
+                    if (showRecommended && uiState.feedVideos.isNotEmpty()) {
+                        item(key = "recommended_header", contentType = "header") {
+                            AdaptiveSectionHeader(
+                                fullTitle = stringResource(R.string.section_recommended_content),
+                                shortTitle = stringResource(R.string.section_recommended_short),
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                        }
+
+                        items(
+                            items = uiState.feedVideos,
+                            key = { it.id },
+                            contentType = { "feed_video" }
+                        ) { video ->
+                            val isPlaying = video.id == uiState.currentPlayingVideo?.id && uiState.isPlaying
+                            val isBuffering = video.id == uiState.currentPlayingVideo?.id && uiState.isAudioBuffering
+                            val isQueued = video.id in uiState.queuedDownloadIds || video.isDownloadQueued
+                            val activeProgress = uiState.downloadingProgressMap[video.id] ?: video.downloadProgress
+                            VideoItem(
+                                video = video,
+                                isPlaying = isPlaying,
+                                isBuffering = isBuffering,
+                                isQueued = isQueued,
+                                downloadProgress = activeProgress,
+                                onPlayClick = { onPlayVideo(video) },
+                                onDownloadClick = { onDownloadVideo(video) },
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                        }
+
+                        if (isFeedLoadingMore) {
+                            item(key = "feed_loading_more_indicator", contentType = "loading_spinner") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(28.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    } else if (!showRecommended) {
+                        item(key = "recommendations_disabled_message") {
+                            RecommendationsDisabledFeedState(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 32.dp, vertical = 24.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -515,6 +527,7 @@ fun RecommendationsDisabledFeedState(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChannelsScreen(
     followedChannels: List<Channel>,
@@ -531,6 +544,7 @@ fun ChannelsScreen(
     onDownloadVideo: (Video) -> Unit,
     onLoadMore: () -> Unit,
     onSearchClick: () -> Unit,
+    onRefresh: () -> Unit = {},
     contentPadding: PaddingValues,
     queuedDownloadIds: Set<String> = emptySet(),
     downloadingProgressMap: Map<String, Float> = emptyMap(),
@@ -551,60 +565,65 @@ fun ChannelsScreen(
         }
     }
 
-    if (followedChannels.isEmpty()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding)
-                .padding(horizontal = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Box(
+    PullToRefreshBox(
+        isRefreshing = isSyncing,
+        onRefresh = onRefresh,
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+    ) {
+        if (followedChannels.isEmpty()) {
+            Column(
                 modifier = Modifier
-                    .size(80.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                    .clickable(onClick = onSearchClick),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Subscriptions,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(42.dp)
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        .clickable(onClick = onSearchClick),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Subscriptions,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(42.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = stringResource(R.string.channels_empty_title),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = stringResource(R.string.channels_empty_description),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
                 )
             }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Text(
-                text = stringResource(R.string.channels_empty_title),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = stringResource(R.string.channels_empty_description),
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                lineHeight = 20.sp,
-            )
-        }
-    } else {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(contentPadding),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             if (isSyncing) {
                 item(key = "channels_syncing_indicator") {
                     Box(
@@ -726,6 +745,7 @@ fun ChannelsScreen(
             }
         }
     }
+}
 }
 
 

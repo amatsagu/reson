@@ -74,6 +74,58 @@ class VideoDao {
         return videos
     }
 
+    /**
+     * Fetches unwatched videos from followed channels (last_played_at == 0 and playback_progress == 0).
+     */
+    fun getUnwatchedFollowedVideos(
+        db: SQLiteDatabase,
+        limit: Int = 30,
+        offset: Int = 0
+    ): List<Video> {
+        val videos = mutableListOf<Video>()
+        val query = """
+            SELECT v.* FROM videos v
+            INNER JOIN channels c ON v.channel_id = c.id
+            WHERE c.is_followed = 1
+              AND v.last_played_at = 0
+              AND v.playback_progress = 0
+            ORDER BY v.release_timestamp DESC, v.created_at DESC
+            LIMIT ? OFFSET ?
+        """.trimIndent()
+        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
+            while (cursor.moveToNext()) {
+                videos.add(cursorToVideo(cursor))
+            }
+        }
+        return videos
+    }
+
+    /**
+     * Fetches recommended discovery videos (channels NOT followed) that have not been watched yet.
+     */
+    fun getRecommendedDiscoveryVideos(
+        db: SQLiteDatabase,
+        limit: Int = 30,
+        offset: Int = 0
+    ): List<Video> {
+        val videos = mutableListOf<Video>()
+        val query = """
+            SELECT v.* FROM videos v
+            LEFT JOIN channels c ON v.channel_id = c.id
+            WHERE (c.is_followed IS NULL OR c.is_followed = 0)
+              AND v.last_played_at = 0
+              AND v.playback_progress = 0
+            ORDER BY v.created_at DESC, v.release_timestamp DESC
+            LIMIT ? OFFSET ?
+        """.trimIndent()
+        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
+            while (cursor.moveToNext()) {
+                videos.add(cursorToVideo(cursor))
+            }
+        }
+        return videos
+    }
+
     fun getContinueListeningVideos(db: SQLiteDatabase, limit: Int = 10, offset: Int = 0): List<Video> {
         val videos = mutableListOf<Video>()
         // In-progress: started (progress > 1% or position > 3s) and not fully listened (< 98% complete)

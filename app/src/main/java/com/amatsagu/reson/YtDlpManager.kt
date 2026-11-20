@@ -1132,9 +1132,13 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 ensureReady()
                 val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
                         trimmed.startsWith("https://", ignoreCase = true)
+                val isAlreadySearchTarget = trimmed.startsWith("ytsearch", ignoreCase = true)
 
                 val targetEnd = startIndex + maxResults - 1
-                val searchTarget = if (isDirectUrl) trimmed else "ytsearch$targetEnd:$trimmed"
+                val searchTarget = when {
+                    isDirectUrl || isAlreadySearchTarget -> trimmed
+                    else -> "ytsearch$targetEnd:$trimmed"
+                }
 
                 val request = YoutubeDLRequest(searchTarget).apply {
                     addOption("--flat-playlist")

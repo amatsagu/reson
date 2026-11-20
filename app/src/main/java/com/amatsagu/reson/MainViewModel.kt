@@ -73,6 +73,7 @@ data class MainUiState(
     val downloadedVideos: List<Video> = emptyList(),
 
     // Pagination & Infinite Scroll states
+    val isFeedRefreshing: Boolean = false,
     val isFeedLoadingMore: Boolean = false,
     val canLoadMoreFeed: Boolean = true,
     val isContinueLoadingMore: Boolean = false,
@@ -292,12 +293,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Observe feed videos (from followed channels), excluding any items in continue listening
         viewModelScope.launch {
-            databaseManager.observeFeedVideos().collect { videos ->
+            databaseManager.observeFeedVideos(limit = PAGE_SIZE).collect { videos ->
                 _uiState.update { current ->
                     val continueIds = current.continueVideos.map { it.id }.toSet()
-                    current.copy(feedVideos = videos.filterNot { it.id in continueIds })
+                    val historyIds = current.historyVideos.map { it.id }.toSet()
+                    val excluded = continueIds + historyIds
+                    val filtered = videos.filterNot { it.id in excluded }
+                    current.copy(feedVideos = filtered)
                 }
             }
+        }
+
+        // Background check: replenish discovery pool with fresh collaborator/similar-creator content
+        viewModelScope.launch {
+            replenishDiscoveryFeedIfNeeded(force = false)
         }
 
         // Observe uploads for the channels section (all followed channels within the last month)
@@ -318,21 +327,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Observe continue listening items (in-progress videos) and ensure feed excludes them
         viewModelScope.launch {
-            databaseManager.observeContinueListening().collect { videos ->
+            databaseManager.observeContinueListening().collect { continueVids ->
                 _uiState.update { current ->
-                    val continueIds = videos.map { it.id }.toSet()
+                    val continueIds = continueVids.map { it.id }.toSet()
+                    val historyIds = current.historyVideos.map { it.id }.toSet()
+                    val excluded = continueIds + historyIds
                     current.copy(
-                        continueVideos = videos,
-                        feedVideos = current.feedVideos.filterNot { it.id in continueIds }
+                        continueVideos = continueVids,
+                        feedVideos = current.feedVideos.filterNot { it.id in excluded }
                     )
                 }
             }
         }
 
-        // Observe listening history
+        // Observe listening history and ensure feed excludes watched items
         viewModelScope.launch {
-            databaseManager.observePlaybackHistory().collect { videos ->
-                _uiState.update { it.copy(historyVideos = videos) }
+            databaseManager.observePlaybackHistory().collect { histVids ->
+                _uiState.update { current ->
+                    val historyIds = histVids.map { it.id }.toSet()
+                    val continueIds = current.continueVideos.map { it.id }.toSet()
+                    val excluded = continueIds + historyIds
+                    current.copy(
+                        historyVideos = histVids,
+                        feedVideos = current.feedVideos.filterNot { it.id in excluded }
+                    )
+                }
             }
         }
 
@@ -638,8 +657,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Infinite scroll pagination: loads next page of feed videos from followed channels.
-     * Automatically filters out any items currently present in the continue listening list.
+     * Pull-to-refresh for Feed: forces fresh discovery sampling from rotating followed creator seeds.
+     */
+    fun refreshFeed() {
+        if (_uiState.value.isFeedRefreshing) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFeedRefreshing = true) }
+            replenishDiscoveryFeedIfNeeded(force = true)
+            val continueIds = _uiState.value.continueVideos.map { it.id }.toSet()
+            val historyIds = _uiState.value.historyVideos.map { it.id }.toSet()
+            val freshFeed = databaseManager.getFeedVideos(
+                limit = PAGE_SIZE,
+                offset = 0,
+                excludeIds = continueIds + historyIds
+            )
+            _uiState.update { it.copy(feedVideos = freshFeed, isFeedRefreshing = false, canLoadMoreFeed = freshFeed.size >= PAGE_SIZE) }
+        }
+    }
+
+    /**
+     * Infinite scroll pagination: loads next page of feed videos using the anti-clustering 25%/75% mix.
+     * Automatically filters out any items currently present in continue listening or history lists.
+     * If the local recommended pool runs low, fetches the next batch of discovery videos from YouTube.
      */
     fun loadMoreFeedVideos() {
         val state = _uiState.value
@@ -647,17 +686,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         feedPaginationJob = viewModelScope.launch(ResonDispatchers.Database) {
             _uiState.update { it.copy(isFeedLoadingMore = true) }
-            val currentOffset = _uiState.value.feedVideos.size
-            val nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentOffset)
+            val currentFeedIds = _uiState.value.feedVideos.map { it.id }.toSet()
+            val continueIds = _uiState.value.continueVideos.map { it.id }.toSet()
+            val historyIds = _uiState.value.historyVideos.map { it.id }.toSet()
+            val excludeIds = currentFeedIds + continueIds + historyIds
+
+            var nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentFeedIds.size, excludeIds = excludeIds)
+
+            // If local DB doesn't have enough videos to fill the requested page, replenish discovery from YouTube and re-query
+            if (nextBatch.size < PAGE_SIZE) {
+                replenishDiscoveryFeedIfNeeded(force = true)
+                nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentFeedIds.size, excludeIds = excludeIds)
+            }
 
             _uiState.update { current ->
-                val continueIds = current.continueVideos.map { it.id }.toSet()
                 val existingIds = current.feedVideos.map { it.id }.toSet()
-                val newUnique = nextBatch.filter { !existingIds.contains(it.id) && !continueIds.contains(it.id) }
+                val newUnique = nextBatch.filter {
+                    !existingIds.contains(it.id) && !continueIds.contains(it.id) && !historyIds.contains(it.id)
+                }
                 current.copy(
                     feedVideos = current.feedVideos + newUnique,
                     isFeedLoadingMore = false,
-                    canLoadMoreFeed = nextBatch.size >= PAGE_SIZE
+                    canLoadMoreFeed = newUnique.isNotEmpty()
                 )
             }
         }
@@ -898,8 +948,134 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            // Also replenish discovery recommendations based on followed channels
+            replenishDiscoveryFeedIfNeeded(force = true)
+
             _uiState.update { it.copy(isSyncingChannels = false) }
             addLog("Channels sync completed.")
+        }
+    }
+
+    private var discoverySeedIndex = 0
+    private var discoveryVariant = 0
+
+    /**
+     * Replenishes the discovery video pool in SQLite using rotating seeds from followed channels.
+     * Searches for collaborations, podcasts, interviews, and peer creator topics to discover
+     * recommended videos from other channels in the same ecosystem.
+     */
+    suspend fun replenishDiscoveryFeedIfNeeded(force: Boolean = false) = withContext(ResonDispatchers.Database) {
+        val unplayedDiscoveryCount = databaseManager.getRecommendedDiscoveryVideos(limit = 40, offset = 0).size
+        if (!force && unplayedDiscoveryCount >= 30) return@withContext
+
+        val followedChannels = databaseManager.getFollowedChannels()
+        if (followedChannels.isEmpty()) return@withContext
+
+        val seed1 = followedChannels[discoverySeedIndex % followedChannels.size]
+        val seed2 = if (followedChannels.size > 1) {
+            followedChannels[(discoverySeedIndex + 1) % followedChannels.size]
+        } else {
+            seed1
+        }
+        discoverySeedIndex = (discoverySeedIndex + 1) % followedChannels.size
+        val currentVariant = discoveryVariant++
+
+        // Generate smart discovery search queries that return OTHER creators
+        val query1: String
+        val query2: String
+
+        if (seed1.id != seed2.id) {
+            // Multiple followed channels: sample collaborators / podcasts across both
+            query1 = if (currentVariant % 2 == 0) "${seed1.title} collab" else "${seed1.title} podcast"
+            query2 = if (currentVariant % 2 == 0) "${seed2.title} podcast" else "${seed2.title} collab"
+        } else {
+            // Single followed channel: diversify between collabs, podcasts, and video topic queries
+            when (currentVariant % 3) {
+                0 -> {
+                    query1 = "${seed1.title} collab"
+                    query2 = "${seed1.title} podcast"
+                }
+                1 -> {
+                    // Extract topic words from a recent upload to find peer creators covering same subject
+                    val seedVideos = databaseManager.getVideosForChannel(seed1.id, limit = 5, offset = 0)
+                    val sampleVideo = seedVideos.firstOrNull { it.title.length > 5 }
+                    val cleanTopic = if (sampleVideo != null) {
+                        sampleVideo.title
+                            .replace(Regex("(?i)\\b${Regex.escape(seed1.title)}\\b"), "")
+                            .replace(Regex("[^a-zA-Z0-9 ]"), " ")
+                            .trim()
+                            .split(Regex("\\s+"))
+                            .filter { it.length > 2 }
+                            .take(4)
+                            .joinToString(" ")
+                    } else ""
+                    query1 = cleanTopic.ifEmpty { "${seed1.title} interview" }
+                    query2 = "${seed1.title} podcast"
+                }
+                else -> {
+                    query1 = "${seed1.title} interview"
+                    query2 = "${seed1.title} with"
+                }
+            }
+        }
+
+        withContext(ResonDispatchers.Network) {
+            val followedIds = followedChannels.map { it.id }.toSet()
+            val followedTitles = followedChannels.map { it.title.lowercase().trim() }.toSet()
+
+            val d1 = async {
+                ytDlpManager.searchContent(query1, maxResults = 20, priority = TaskPriority.BACKGROUND)
+            }
+            val d2 = async {
+                ytDlpManager.searchContent(query2, maxResults = 20, priority = TaskPriority.BACKGROUND)
+            }
+
+            val res1 = (d1.await() as? Result.Success)?.data.orEmpty()
+            val res2 = (d2.await() as? Result.Success)?.data.orEmpty()
+
+            val candidates = (res1 + res2).filterNot {
+                it.channelId in followedIds ||
+                it.channelTitle.lowercase().trim() in followedTitles ||
+                YtDlpManager.isLockedVideoTitle(it.title)
+            }
+
+            if (candidates.isNotEmpty()) {
+                databaseManager.upsertVideos(candidates)
+                addLog("Stocked ${candidates.size} new discovery videos from queries: '$query1', '$query2'")
+            }
+        }
+    }
+
+    /**
+     * Pull-to-refresh for the Channels section:
+     * - In "All Channels" view: syncs all followed channels and caches new uploads.
+     * - In specific channel view: fetches the latest uploads for that specific channel from YouTube.
+     */
+    fun refreshChannelsSection() {
+        val selectedId = _uiState.value.selectedChannelId
+        if (selectedId == null) {
+            syncFollowedChannels()
+        } else {
+            viewModelScope.launch {
+                _uiState.update { it.copy(isSyncingChannels = true) }
+                val ch = _uiState.value.followedChannelList.find { it.id == selectedId }
+                    ?: databaseManager.getFollowedChannels().find { it.id == selectedId }
+                val result = withContext(ResonDispatchers.Network) {
+                    ytDlpManager.fetchChannelVideos(
+                        channelId = selectedId,
+                        handle = ch?.handle.orEmpty(),
+                        channelTitle = ch?.title.orEmpty(),
+                        startIndex = 1,
+                        maxResults = PAGE_SIZE
+                    )
+                }
+                if (result is Result.Success && result.data.isNotEmpty()) {
+                    databaseManager.upsertVideos(result.data, defaultChannelId = selectedId)
+                    val updated = databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = 0)
+                    _uiState.update { it.copy(channelVideos = updated, canLoadMoreChannelVideos = updated.size >= PAGE_SIZE) }
+                }
+                _uiState.update { it.copy(isSyncingChannels = false) }
+            }
         }
     }
 

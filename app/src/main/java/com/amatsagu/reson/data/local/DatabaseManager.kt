@@ -190,18 +190,62 @@ class DatabaseManager private constructor(private val appContext: Context) {
      * Uses balanced distribution across followed channels (up to 5 recent uploads per channel)
      * to prevent high-frequency uploaders from starving the feed.
      */
-    suspend fun getFeedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
+    /**
+     * Gets unwatched videos from followed channels.
+     */
+    suspend fun getUnwatchedFollowedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
-        val balanced = videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel = 5, limit = limit, offset = offset)
-        if (balanced.isNotEmpty() || offset > 0) {
-            balanced
+        videoDao.getUnwatchedFollowedVideos(db, limit, offset)
+    }
+
+    /**
+     * Gets unwatched recommended discovery videos from non-followed channels.
+     */
+    suspend fun getRecommendedDiscoveryVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
+        val db = dbHelper.readableDatabase
+        videoDao.getRecommendedDiscoveryVideos(db, limit, offset)
+    }
+
+    /**
+     * Fetches feed videos using the anti-clustering 25% followed unwatched / 75% recommended discovery mix.
+     * Guaranteed:
+     * - Zero duplicates
+     * - Zero watched/in-progress videos
+     * - Dispersed creators to prevent clustering
+     */
+    suspend fun getFeedVideos(
+        limit: Int = 30,
+        offset: Int = 0,
+        excludeIds: Set<String> = emptySet()
+    ): List<Video> = withContext(dispatcher) {
+        val db = dbHelper.readableDatabase
+
+        // In a 1:3 ratio, followed represents 1/4 of items, recommended represents 3/4
+        val followedOffset = offset / 4
+        val recOffset = (offset * 3) / 4
+
+        val followed = videoDao.getUnwatchedFollowedVideos(db, limit = limit, offset = followedOffset)
+        val recommended = videoDao.getRecommendedDiscoveryVideos(db, limit = limit * 2, offset = recOffset)
+
+        val mixed = com.amatsagu.reson.FeedMixer.mix(
+            followedUnwatched = followed,
+            recommended = recommended,
+            excludeIds = excludeIds,
+            limit = limit
+        )
+
+        if (mixed.isNotEmpty()) {
+            mixed
+        } else if (offset == 0) {
+            // Fallback for fresh installs where no discovery videos have been fetched yet:
+            videoDao.getFeedVideos(db, limit, offset).filterNot { it.id in excludeIds }
         } else {
-            videoDao.getFeedVideos(db, limit, offset)
+            emptyList()
         }
     }
 
     /**
-     * Reactive Flow of recent uploads from followed channels (initial page).
+     * Reactive Flow of mixed feed videos (initial page).
      */
     fun observeFeedVideos(limit: Int = 30): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
