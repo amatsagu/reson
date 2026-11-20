@@ -40,7 +40,10 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,9 +52,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -135,6 +140,25 @@ fun SearchOverlay(
     val focusRequester = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
+    var textFieldValue by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = query,
+                selection = TextRange(query.length)
+            )
+        )
+    }
+
+    // Keep textFieldValue in sync whenever external query changes (e.g. suggestion tapped, cleared, etc.)
+    LaunchedEffect(query) {
+        if (query != textFieldValue.text) {
+            textFieldValue = TextFieldValue(
+                text = query,
+                selection = TextRange(query.length)
+            )
+        }
+    }
+
     // Detect when scrolling near the end to trigger infinite scroll load-more
     val shouldLoadMore = remember {
         derivedStateOf {
@@ -153,6 +177,10 @@ fun SearchOverlay(
     // Instantly request focus and show keyboard when overlay becomes visible
     LaunchedEffect(visible) {
         if (visible) {
+            textFieldValue = TextFieldValue(
+                text = query,
+                selection = TextRange(query.length)
+            )
             delay(100)
             focusRequester.requestFocus()
             keyboardController?.show()
@@ -203,8 +231,13 @@ fun SearchOverlay(
 
                 // Text field inside the pill (starts at exact same 50dp offset as SearchPillBar)
                 BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
+                    value = textFieldValue,
+                    onValueChange = { newValue ->
+                        textFieldValue = newValue
+                        if (newValue.text != query) {
+                            onQueryChange(newValue.text)
+                        }
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester),
@@ -217,11 +250,11 @@ fun SearchOverlay(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
                         keyboardController?.hide()
-                        onSearch(query)
+                        onSearch(textFieldValue.text)
                     }),
                     decorationBox = { innerTextField ->
                         Box(contentAlignment = Alignment.CenterStart) {
-                            if (query.isEmpty()) {
+                            if (textFieldValue.text.isEmpty()) {
                                 Text(
                                     text = stringResource(R.string.search_content),
                                     fontSize = 15.sp,
@@ -234,7 +267,7 @@ fun SearchOverlay(
                 )
 
                 // When text is typed, replace the search icon with the 'X' close/clear icon
-                if (query.isNotEmpty()) {
+                if (textFieldValue.text.isNotEmpty()) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = stringResource(R.string.action_clear),
@@ -245,6 +278,7 @@ fun SearchOverlay(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = ripple(bounded = false, radius = 18.dp)
                             ) {
+                                textFieldValue = TextFieldValue("", TextRange.Zero)
                                 onQueryChange("")
                             }
                     )
@@ -260,7 +294,7 @@ fun SearchOverlay(
                                 indication = ripple(bounded = false, radius = 18.dp)
                             ) {
                                 keyboardController?.hide()
-                                onSearch(query)
+                                onSearch(textFieldValue.text)
                             }
                     )
                 }
@@ -308,6 +342,68 @@ fun SearchOverlay(
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
                             )
+                        }
+                    }
+
+                    // Autocomplete suggestions list while typing (prioritized over results so typing immediately shows suggestions)
+                    suggestions.isNotEmpty() -> {
+                        LazyColumn(
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            items(
+                                items = suggestions,
+                                key = { it },
+                                contentType = { "suggestion" }
+                            ) { suggestion ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            keyboardController?.hide()
+                                            textFieldValue = TextFieldValue(
+                                                text = suggestion,
+                                                selection = TextRange(suggestion.length)
+                                            )
+                                            onQueryChange(suggestion)
+                                            onSearch(suggestion)
+                                        }
+                                        .padding(vertical = 12.dp, horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Text(
+                                        text = suggestion,
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.NorthWest,
+                                        contentDescription = stringResource(R.string.action_use_suggestion),
+                                        tint = MaterialTheme.colorScheme.outline,
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = ripple(bounded = false, radius = 16.dp)
+                                            ) {
+                                                textFieldValue = TextFieldValue(
+                                                    text = suggestion,
+                                                    selection = TextRange(suggestion.length)
+                                                )
+                                                onQueryChange(suggestion)
+                                                focusRequester.requestFocus()
+                                            }
+                                            .padding(6.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -370,51 +466,6 @@ fun SearchOverlay(
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     }
-                                }
-                            }
-                        }
-                    }
-
-                    // Autocomplete suggestions list while typing
-                    suggestions.isNotEmpty() -> {
-                        LazyColumn(
-                            contentPadding = PaddingValues(vertical = 8.dp)
-                        ) {
-                            items(
-                                items = suggestions,
-                                key = { it },
-                                contentType = { "suggestion" }
-                            ) { suggestion ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            keyboardController?.hide()
-                                            onQueryChange(suggestion)
-                                            onSearch(suggestion)
-                                        }
-                                        .padding(vertical = 12.dp, horizontal = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Text(
-                                        text = suggestion,
-                                        fontSize = 15.sp,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Default.NorthWest,
-                                        contentDescription = stringResource(R.string.action_use_suggestion),
-                                        tint = MaterialTheme.colorScheme.outline,
-                                        modifier = Modifier.size(16.dp)
-                                    )
                                 }
                             }
                         }

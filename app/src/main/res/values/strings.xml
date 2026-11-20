@@ -57,7 +57,8 @@
     <!-- Channels Screen -->
     <string name="channels_title">Channels</string>
     <string name="channels_filter_all">All</string>
-    <string name="channels_recent_uploads">Recent Uploads</string>
+    <string name="channels_recent_videos">Recent videos</string>
+    <string name="channels_recent_short">Recent</string>
     <string name="channels_empty_title">No Channels Followed Yet</string>
     <string name="channels_empty_description">Search for channels or creators and follow them to see their latest uploads and episodes here.</string>
     <string name="channels_no_videos">No uploads found for this channel yet.</string>

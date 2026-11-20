@@ -229,9 +229,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Handles typing in search bar with debounced autocomplete suggestions.
      */
     fun onSearchQueryChange(newQuery: String) {
+        val queryChanged = newQuery != _uiState.value.searchQuery
         _uiState.update {
             it.copy(
                 searchQuery = newQuery,
+                searchResults = if (queryChanged) emptyList() else it.searchResults,
+                canLoadMoreSearch = if (queryChanged) false else it.canLoadMoreSearch,
+                isSearchLoadingMore = if (queryChanged) false else it.isSearchLoadingMore,
                 searchErrorRes = null,
                 searchErrorArg = null
             )

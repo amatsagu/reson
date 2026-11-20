@@ -435,22 +435,20 @@ fun ChannelsScreen(
                 .fillMaxSize()
                 .padding(contentPadding),
             contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Screen Header
             item(key = "channels_screen_header") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = stringResource(R.string.channels_title),
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                    AdaptiveSectionHeader(
+                        fullTitle = stringResource(R.string.channels_title),
+                        shortTitle = stringResource(R.string.channels_title)
                     )
 
                     if (isSyncing) {
@@ -496,16 +494,16 @@ fun ChannelsScreen(
             // Section Header for Videos
             item(key = "recent_videos_header") {
                 val selectedChannel = followedChannels.find { it.id == selectedChannelId }
-                val headerTitle = if (selectedChannel != null) {
-                    selectedChannel.title
+                val (fullHeader, shortHeader) = if (selectedChannel != null) {
+                    selectedChannel.title to selectedChannel.title
                 } else {
-                    stringResource(R.string.channels_recent_uploads)
+                    stringResource(R.string.channels_recent_videos) to stringResource(R.string.channels_recent_short)
                 }
 
                 AdaptiveSectionHeader(
-                    fullTitle = headerTitle,
-                    shortTitle = headerTitle,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    fullTitle = fullHeader,
+                    shortTitle = shortHeader,
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
 
