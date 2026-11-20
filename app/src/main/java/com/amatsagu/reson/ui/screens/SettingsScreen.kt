@@ -158,15 +158,6 @@ fun SettingsScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Screen Header
-        Text(
-            text = stringResource(R.string.settings_title),
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
-
         // =========================================================================
         // 1. App Details Card
         // =========================================================================

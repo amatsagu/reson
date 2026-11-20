@@ -563,24 +563,17 @@ fun ChannelsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding),
-            contentPadding = PaddingValues(bottom = 24.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Screen Header
-            item(key = "channels_screen_header") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    AdaptiveSectionHeader(
-                        fullTitle = stringResource(R.string.channels_title),
-                        shortTitle = stringResource(R.string.channels_title)
-                    )
-
-                    if (isSyncing) {
+            if (isSyncing) {
+                item(key = "channels_syncing_indicator") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
                         Text(
                             text = stringResource(R.string.channels_syncing),
                             fontSize = 12.sp,
