@@ -26,10 +26,11 @@ fun ResonBottomNavBar(
     selectedTab: ResonTab,
     onTabSelected: (ResonTab) -> Unit,
     modifier: Modifier = Modifier,
+    containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceContainer,
 ) {
     NavigationBar(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        containerColor = containerColor,
         tonalElevation = 0.dp
     ) {
         ResonTab.entries.forEach { tab ->

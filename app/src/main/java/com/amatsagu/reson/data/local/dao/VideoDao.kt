@@ -11,8 +11,27 @@ import com.amatsagu.reson.model.Video
 class VideoDao {
 
     fun upsertVideo(db: SQLiteDatabase, video: Video, channelId: String = "") {
-        val values = toContentValues(video, channelId)
-        db.insertWithOnConflict("videos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        val effectiveChannelId = video.channelId.ifEmpty { channelId }
+        val values = toContentValues(video, effectiveChannelId)
+
+        // Try inserting with CONFLICT_IGNORE if row is new
+        val rowId = db.insertWithOnConflict("videos", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+        if (rowId == -1L) {
+            // Row already exists: update fields while preserving existing playback and download states
+            val existing = getVideoById(db, video.id)
+            if (existing != null) {
+                if (video.playbackPositionMs == 0L && existing.playbackPositionMs > 0L) {
+                    values.put("playback_position_ms", existing.playbackPositionMs)
+                    values.put("playback_duration_ms", existing.playbackDurationMs)
+                    values.put("playback_progress", existing.playbackProgress)
+                    values.put("last_played_at", existing.lastPlayedAt)
+                }
+                if (!video.isDownloaded && existing.isDownloaded) {
+                    values.put("is_downloaded", 1)
+                }
+            }
+            db.update("videos", values, "id = ?", arrayOf(video.id))
+        }
     }
 
     fun upsertVideos(db: SQLiteDatabase, videos: List<Video>, defaultChannelId: String = "") {
@@ -20,9 +39,7 @@ class VideoDao {
         db.beginTransaction()
         try {
             for (video in videos) {
-                val effectiveChannelId = video.channelId.ifEmpty { defaultChannelId }
-                val values = toContentValues(video, effectiveChannelId)
-                db.insertWithOnConflict("videos", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                upsertVideo(db, video, defaultChannelId)
             }
             db.setTransactionSuccessful()
         } finally {
@@ -54,16 +71,18 @@ class VideoDao {
         return videos
     }
 
-    fun getContinueListeningVideos(db: SQLiteDatabase, limit: Int = 10): List<Video> {
+    fun getContinueListeningVideos(db: SQLiteDatabase, limit: Int = 10, offset: Int = 0): List<Video> {
         val videos = mutableListOf<Video>()
-        // In-progress: between 2% and 95% complete, sorted by most recently listened
+        // In-progress: started (progress > 1% or position > 3s) and not fully listened (< 98% complete)
         val query = """
             SELECT * FROM videos
-            WHERE playback_progress > 0.02 AND playback_progress < 0.95
+            WHERE last_played_at > 0 
+              AND (playback_progress > 0.01 OR playback_position_ms > 3000) 
+              AND playback_progress < 0.98
             ORDER BY last_played_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(limit.toString())).use { cursor ->
+        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 videos.add(cursorToVideo(cursor))
             }
@@ -139,7 +158,29 @@ class VideoDao {
             put("playback_progress", progress)
             put("last_played_at", timestamp)
         }
-        return db.update("videos", values, "id = ?", arrayOf(videoId)) > 0
+        val updated = db.update("videos", values, "id = ?", arrayOf(videoId)) > 0
+        if (updated) {
+            trimListeningHistory(db, 100)
+        }
+        return updated
+    }
+
+    /**
+     * Trims listening history to at most maxRecords (default 100) by clearing playback state
+     * on the oldest records beyond the limit.
+     */
+    fun trimListeningHistory(db: SQLiteDatabase, maxRecords: Int = 100) {
+        val query = """
+            UPDATE videos
+            SET last_played_at = 0, playback_position_ms = 0, playback_progress = 0.0
+            WHERE last_played_at > 0 AND id NOT IN (
+                SELECT id FROM videos
+                WHERE last_played_at > 0
+                ORDER BY last_played_at DESC
+                LIMIT ?
+            )
+        """.trimIndent()
+        db.execSQL(query, arrayOf(maxRecords.toString()))
     }
 
     fun updateDownloadStatus(db: SQLiteDatabase, videoId: String, isDownloaded: Boolean, filePath: String?): Boolean {

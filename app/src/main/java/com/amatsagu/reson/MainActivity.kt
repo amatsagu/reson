@@ -57,8 +57,7 @@ import com.amatsagu.reson.ui.components.AppLoadingOverlay
 import com.amatsagu.reson.ui.components.ChannelAvatarCard
 import com.amatsagu.reson.ui.components.ChannelItem
 import com.amatsagu.reson.ui.components.ContinueSection
-import com.amatsagu.reson.ui.components.MiniPlayerBar
-import com.amatsagu.reson.ui.components.ResonBottomNavBar
+import com.amatsagu.reson.ui.components.ResonUnifiedBottomBar
 import com.amatsagu.reson.ui.components.SearchOverlay
 import com.amatsagu.reson.ui.components.SearchPillBar
 import com.amatsagu.reson.ui.components.VideoItem
@@ -93,80 +92,92 @@ fun ResonApp(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                Column {
-                    uiState.currentPlayingVideo?.let { video ->
-                        MiniPlayerBar(
-                            video = video,
-                            isPlaying = uiState.isPlaying,
-                            onPlayPauseClick = { viewModel.togglePlayPause() },
-                            onClick = {}
-                        )
+                ResonUnifiedBottomBar(
+                    currentVideo = uiState.currentPlayingVideo,
+                    isPlaying = uiState.isPlaying,
+                    isBuffering = uiState.isAudioBuffering,
+                    positionMs = uiState.playbackPositionMs,
+                    durationMs = uiState.playbackDurationMs,
+                    onPlayPauseClick = { viewModel.togglePlayPause() },
+                    onSeek = { viewModel.seekTo(it) },
+                    onCloseClick = { viewModel.closePlayer() },
+                    selectedTab = uiState.selectedTab,
+                    onTabSelected = { tab ->
+                        if (uiState.isSearchActive) {
+                            viewModel.closeSearch()
+                        }
+                        viewModel.selectTab(tab)
                     }
-
-                    ResonBottomNavBar(
-                        selectedTab = uiState.selectedTab,
-                        onTabSelected = { viewModel.selectTab(it) }
-                    )
-                }
+                )
             }
         ) { innerPadding ->
-            when (uiState.selectedTab) {
-                ResonTab.Feed -> {
-                    FeedScreen(
-                        uiState = uiState,
-                        onSearchClick = { viewModel.openSearch() },
-                        onPlayVideo = { viewModel.playVideo(it) },
-                        onDownloadVideo = { viewModel.downloadVideo(it) },
-                        isFeedLoadingMore = uiState.isFeedLoadingMore,
-                        onLoadMore = { viewModel.loadMoreFeedVideos() },
-                        contentPadding = innerPadding
-                    )
+            Box(modifier = Modifier.fillMaxSize()) {
+                when (uiState.selectedTab) {
+                    ResonTab.Feed -> {
+                        FeedScreen(
+                            uiState = uiState,
+                            onSearchClick = { viewModel.openSearch() },
+                            onPlayVideo = { viewModel.playVideo(it) },
+                            onDownloadVideo = { viewModel.downloadVideo(it) },
+                            isFeedLoadingMore = uiState.isFeedLoadingMore,
+                            onLoadMore = { viewModel.loadMoreFeedVideos() },
+                            onLoadMoreContinue = { viewModel.loadMoreContinueVideos() },
+                            contentPadding = innerPadding
+                        )
+                    }
+                    ResonTab.Channels -> {
+                        ChannelsScreen(
+                            followedChannels = uiState.followedChannelList,
+                            selectedChannelId = uiState.selectedChannelId,
+                            videos = uiState.channelVideos,
+                            isSyncing = uiState.isSyncingChannels,
+                            isChannelLoadingMore = uiState.isChannelLoadingMore,
+                            currentPlayingVideoId = uiState.currentPlayingVideo?.id,
+                            isPlaybackActive = uiState.isPlaying,
+                            isAudioBuffering = uiState.isAudioBuffering,
+                            onSelectChannel = { viewModel.selectChannelFilter(it) },
+                            onFollowClick = { viewModel.toggleFollowChannel(it) },
+                            onPlayVideo = { viewModel.playVideo(it) },
+                            onDownloadVideo = { viewModel.downloadVideo(it) },
+                            onLoadMore = { viewModel.loadMoreChannelVideos() },
+                            onSearchClick = { viewModel.openSearch() },
+                            contentPadding = innerPadding
+                        )
+                    }
+                    ResonTab.Library -> {
+                        LibraryScreen(
+                            ytDlpState = ytDlpState,
+                            onCheckUpdate = { viewModel.checkUpdate() },
+                            onSelfRepair = { viewModel.selfRepair() },
+                            contentPadding = innerPadding
+                        )
+                    }
                 }
-                ResonTab.Channels -> {
-                    ChannelsScreen(
-                        followedChannels = uiState.followedChannelList,
-                        selectedChannelId = uiState.selectedChannelId,
-                        videos = uiState.channelVideos,
-                        isSyncing = uiState.isSyncingChannels,
-                        isChannelLoadingMore = uiState.isChannelLoadingMore,
-                        onSelectChannel = { viewModel.selectChannelFilter(it) },
-                        onFollowClick = { viewModel.toggleFollowChannel(it) },
-                        onPlayVideo = { viewModel.playVideo(it) },
-                        onDownloadVideo = { viewModel.downloadVideo(it) },
-                        onLoadMore = { viewModel.loadMoreChannelVideos() },
-                        onSearchClick = { viewModel.openSearch() },
-                        contentPadding = innerPadding
-                    )
-                }
-                ResonTab.Library -> {
-                    LibraryScreen(
-                        ytDlpState = ytDlpState,
-                        onCheckUpdate = { viewModel.checkUpdate() },
-                        onSelfRepair = { viewModel.selfRepair() },
-                        contentPadding = innerPadding
-                    )
-                }
+
+                // Search Overlay placed inside Scaffold content area so unified bottom bar remains docked below
+                SearchOverlay(
+                    visible = uiState.isSearchActive,
+                    query = uiState.searchQuery,
+                    onQueryChange = { viewModel.onSearchQueryChange(it) },
+                    onSearch = { viewModel.executeSearch(it) },
+                    onDismiss = { viewModel.closeSearch() },
+                    suggestions = uiState.suggestions,
+                    isSearching = uiState.isSearching,
+                    searchResults = uiState.searchResults,
+                    isSearchLoadingMore = uiState.isSearchLoadingMore,
+                    onLoadMore = { viewModel.loadMoreSearchResults() },
+                    errorRes = uiState.searchErrorRes,
+                    errorArg = uiState.searchErrorArg,
+                    currentPlayingVideoId = uiState.currentPlayingVideo?.id,
+                    isPlaybackActive = uiState.isPlaying,
+                    isAudioBuffering = uiState.isAudioBuffering,
+                    onPlayVideo = { viewModel.playVideo(it) },
+                    onDownloadVideo = { viewModel.downloadVideo(it) },
+                    onFollowChannel = { viewModel.toggleFollowChannel(it) },
+                    contentPadding = innerPadding
+                )
             }
         }
-
-        // Fullscreen Search Overlay
-        SearchOverlay(
-            visible = uiState.isSearchActive,
-            query = uiState.searchQuery,
-            onQueryChange = { viewModel.onSearchQueryChange(it) },
-            onSearch = { viewModel.executeSearch(it) },
-            onDismiss = { viewModel.closeSearch() },
-            suggestions = uiState.suggestions,
-            isSearching = uiState.isSearching,
-            searchResults = uiState.searchResults,
-            isSearchLoadingMore = uiState.isSearchLoadingMore,
-            onLoadMore = { viewModel.loadMoreSearchResults() },
-            errorRes = uiState.searchErrorRes,
-            errorArg = uiState.searchErrorArg,
-            onPlayVideo = { viewModel.playVideo(it) },
-            onDownloadVideo = { viewModel.downloadVideo(it) },
-            onFollowChannel = { viewModel.toggleFollowChannel(it) }
-        )
 
         // Startup App Loading Overlay with Bypass
         val loadingStatus = if (uiState.loadingStatusArg != null) {
@@ -191,6 +202,7 @@ fun FeedScreen(
     onDownloadVideo: (Video) -> Unit,
     isFeedLoadingMore: Boolean,
     onLoadMore: () -> Unit,
+    onLoadMoreContinue: () -> Unit = {},
     contentPadding: PaddingValues,
 ) {
     val hasContent = uiState.continueVideos.isNotEmpty() || uiState.feedVideos.isNotEmpty()
@@ -249,7 +261,12 @@ fun FeedScreen(
                     item(key = "continue_section", contentType = "continue") {
                         ContinueSection(
                             videos = uiState.continueVideos,
-                            onPlayClick = onPlayVideo
+                            currentPlayingVideoId = uiState.currentPlayingVideo?.id,
+                            isPlaybackActive = uiState.isPlaying,
+                            isAudioBuffering = uiState.isAudioBuffering,
+                            onPlayClick = onPlayVideo,
+                            onLoadMore = onLoadMoreContinue,
+                            isContinueLoadingMore = uiState.isContinueLoadingMore
                         )
                     }
                 }
@@ -268,9 +285,13 @@ fun FeedScreen(
                         key = { it.id },
                         contentType = { "feed_video" }
                     ) { video ->
+                        val isPlaying = video.id == uiState.currentPlayingVideo?.id && uiState.isPlaying
+                        val isBuffering = video.id == uiState.currentPlayingVideo?.id && uiState.isAudioBuffering
                         Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                             VideoItem(
                                 video = video,
+                                isPlaying = isPlaying,
+                                isBuffering = isBuffering,
                                 onPlayClick = { onPlayVideo(video) },
                                 onDownloadClick = { onDownloadVideo(video) }
                             )
@@ -359,6 +380,9 @@ fun ChannelsScreen(
     videos: List<Video>,
     isSyncing: Boolean,
     isChannelLoadingMore: Boolean,
+    currentPlayingVideoId: String? = null,
+    isPlaybackActive: Boolean = false,
+    isAudioBuffering: Boolean = false,
     onSelectChannel: (String?) -> Unit,
     onFollowClick: (Channel) -> Unit,
     onPlayVideo: (Video) -> Unit,
@@ -530,9 +554,13 @@ fun ChannelsScreen(
                     key = { it.id },
                     contentType = { "channel_video" }
                 ) { video ->
+                    val isPlaying = video.id == currentPlayingVideoId && isPlaybackActive
+                    val isBuffering = video.id == currentPlayingVideoId && isAudioBuffering
                     Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                         VideoItem(
                             video = video,
+                            isPlaying = isPlaying,
+                            isBuffering = isBuffering,
                             onPlayClick = { onPlayVideo(video) },
                             onDownloadClick = { onDownloadVideo(video) }
                         )

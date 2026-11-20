@@ -131,9 +131,13 @@ fun SearchOverlay(
     onLoadMore: () -> Unit = {},
     @androidx.annotation.StringRes errorRes: Int? = null,
     errorArg: String? = null,
+    currentPlayingVideoId: String? = null,
+    isPlaybackActive: Boolean = false,
+    isAudioBuffering: Boolean = false,
     onPlayVideo: (Video) -> Unit,
     onDownloadVideo: (Video) -> Unit,
     onFollowChannel: (Channel) -> Unit,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     modifier: Modifier = Modifier,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -348,7 +352,10 @@ fun SearchOverlay(
                     // Autocomplete suggestions list while typing (prioritized over results so typing immediately shows suggestions)
                     suggestions.isNotEmpty() -> {
                         LazyColumn(
-                            contentPadding = PaddingValues(vertical = 8.dp)
+                            contentPadding = PaddingValues(
+                                top = 8.dp,
+                                bottom = contentPadding.calculateBottomPadding() + 8.dp
+                            )
                         ) {
                             items(
                                 items = suggestions,
@@ -411,7 +418,10 @@ fun SearchOverlay(
                     searchResults.isNotEmpty() -> {
                         LazyColumn(
                             state = listState,
-                            contentPadding = PaddingValues(vertical = 12.dp),
+                            contentPadding = PaddingValues(
+                                top = 12.dp,
+                                bottom = contentPadding.calculateBottomPadding() + 16.dp
+                            ),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             item(key = "results_count", contentType = "header") {
@@ -436,8 +446,12 @@ fun SearchOverlay(
                             ) { item ->
                                 when (item) {
                                     is SearchResultItem.Video -> {
+                                        val isPlaying = item.video.id == currentPlayingVideoId && isPlaybackActive
+                                        val isBuffering = item.video.id == currentPlayingVideoId && isAudioBuffering
                                         VideoItem(
                                             video = item.video,
+                                            isPlaying = isPlaying,
+                                            isBuffering = isBuffering,
                                             onPlayClick = { onPlayVideo(item.video) },
                                             onDownloadClick = { onDownloadVideo(item.video) }
                                         )

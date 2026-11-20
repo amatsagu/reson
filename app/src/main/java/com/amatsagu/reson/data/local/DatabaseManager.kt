@@ -257,11 +257,11 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Fetches in-progress videos (between 2% and 95% complete) for the Continue section.
+     * Fetches in-progress videos (< 98% complete) for the Continue section with pagination support.
      */
-    suspend fun getContinueListeningVideos(limit: Int = 10): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getContinueListeningVideos(limit: Int = 10, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
         val db = dbHelper.readableDatabase
-        videoDao.getContinueListeningVideos(db, limit)
+        videoDao.getContinueListeningVideos(db, limit, offset)
     }
 
     /**
@@ -269,7 +269,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
      */
     fun observeContinueListening(limit: Int = 10): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
-            emit(getContinueListeningVideos(limit))
+            emit(getContinueListeningVideos(limit, offset = 0))
         }
     }.flowOn(Dispatchers.IO)
 

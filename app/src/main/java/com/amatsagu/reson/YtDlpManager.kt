@@ -444,6 +444,89 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
     }
 
+    private val streamUrlCache = mutableMapOf<String, Pair<String, Long>>() // videoId -> (streamUrl, expiryEpochMs)
+    private val streamCacheMutex = Mutex()
+
+    /**
+     * Invalidates any cached stream URL for the given videoId so next playback forces fresh extraction.
+     */
+    suspend fun invalidateStreamCache(videoId: String) {
+        streamCacheMutex.withLock {
+            streamUrlCache.remove(videoId)
+        }
+    }
+
+    /**
+     * Extracts direct HTTP streaming audio URL for smart streaming playback without downloading the whole file.
+     * Uses fastest format selector (AAC itag 140) and prioritized Android player client to obtain
+     * direct media stream URL in under ~1 second, with automatic in-memory caching and signature recovery.
+     */
+    suspend fun getAudioStreamUrl(
+        videoId: String,
+        forceRefresh: Boolean = false,
+        autoRetryWithUpdate: Boolean = true
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (!forceRefresh) {
+            val cached = streamCacheMutex.withLock { streamUrlCache[videoId] }
+            if (cached != null) {
+                val (url, expiryMs) = cached
+                // Use cached URL if it still has at least 15 minutes of validity
+                if (now < (expiryMs - 15 * 60 * 1000L)) {
+                    Log.d(TAG, "Serving cached stream URL for $videoId (valid for ${(expiryMs - now) / 60000} more minutes)")
+                    return@withContext Result.Success(url)
+                }
+            }
+        }
+
+        try {
+            ensureReady()
+            val videoUrl = if (videoId.startsWith("http")) videoId else "https://www.youtube.com/watch?v=$videoId"
+            val request = YoutubeDLRequest(videoUrl).apply {
+                // itag 140 is m4a AAC 128k (fastest header parse in ExoPlayer), fallback to best audio
+                addOption("-f", "140/ba[ext=m4a]/ba/b")
+                addOption("-g")
+                addOption("--no-playlist")
+                addOption("--skip-download")
+                addOption("--no-warnings")
+                // Use Android client API first: significantly faster JSON response without JS n-sig deciphering overhead
+                addOption("--extractor-args", "youtube:player_client=android,web")
+            }
+            val response = YoutubeDL.getInstance().execute(request)
+            val streamUrl = response.out.trim().lines().firstOrNull { it.startsWith("http") }
+            if (!streamUrl.isNullOrBlank()) {
+                // Parse expiry timestamp from URL (&expire=1710000000) or default to 4 hours
+                var expiryMs = now + (4 * 3600 * 1000L)
+                val expireMatch = Regex("[?&]expire=(\\d+)").find(streamUrl)
+                if (expireMatch != null) {
+                    val expireSec = expireMatch.groupValues[1].toLongOrNull()
+                    if (expireSec != null && expireSec > 0) {
+                        expiryMs = expireSec * 1000L
+                    }
+                }
+                streamCacheMutex.withLock {
+                    streamUrlCache[videoId] = Pair(streamUrl, expiryMs)
+                }
+                Log.d(TAG, "Extracted fresh stream URL for $videoId (expires in ${(expiryMs - now) / 60000} mins)")
+                Result.Success(streamUrl)
+            } else {
+                Result.Failure(IllegalStateException("No stream URL returned: ${response.out}"), "Failed to extract stream URL")
+            }
+        } catch (e: YoutubeDLException) {
+            Log.w(TAG, "yt-dlp stream extraction error for $videoId: ${e.message}")
+            if (autoRetryWithUpdate) {
+                Log.i(TAG, "Attempting auto-patch update and retry for stream URL...")
+                val updateResult = update(UpdateChannel.STABLE)
+                if (updateResult is Result.Success) {
+                    return@withContext getAudioStreamUrl(videoId, forceRefresh = true, autoRetryWithUpdate = false)
+                }
+            }
+            Result.Failure(e, e.message ?: "Failed to extract audio stream URL")
+        } catch (e: Throwable) {
+            Result.Failure(e, e.message ?: "Unexpected error extracting stream URL")
+        }
+    }
+
     /**
      * Executes custom yt-dlp arguments and returns the raw response.
      */

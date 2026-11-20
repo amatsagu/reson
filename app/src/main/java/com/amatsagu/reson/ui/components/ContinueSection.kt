@@ -16,16 +16,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,8 +54,29 @@ fun ContinueSection(
     videos: List<Video>,
     onPlayClick: (Video) -> Unit,
     modifier: Modifier = Modifier,
+    currentPlayingVideoId: String? = null,
+    isPlaybackActive: Boolean = false,
+    isAudioBuffering: Boolean = false,
+    onLoadMore: () -> Unit = {},
+    isContinueLoadingMore: Boolean = false,
 ) {
     if (videos.isEmpty()) return
+
+    val rowState = rememberLazyListState()
+
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = rowState.layoutInfo.totalItemsCount
+            val lastVisible = rowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 2
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value) {
+            onLoadMore()
+        }
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         AdaptiveSectionHeader(
@@ -60,18 +86,41 @@ fun ContinueSection(
         )
 
         LazyRow(
+            state = rowState,
             contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             items(
                 items = videos,
                 key = { it.id },
                 contentType = { "continue_video" }
             ) { video ->
+                val isPlaying = video.id == currentPlayingVideoId && isPlaybackActive
+                val isBuffering = video.id == currentPlayingVideoId && isAudioBuffering
                 ContinueCard(
                     video = video,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
                     onPlayClick = { onPlayClick(video) }
                 )
+            }
+
+            if (isContinueLoadingMore) {
+                item(key = "continue_loading_spinner", contentType = "loading_spinner") {
+                    Box(
+                        modifier = Modifier
+                            .width(60.dp)
+                            .height(96.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
         }
     }
@@ -82,6 +131,8 @@ fun ContinueCard(
     video: Video,
     onPlayClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = false,
+    isBuffering: Boolean = false,
 ) {
     Card(
         modifier = modifier
@@ -186,12 +237,20 @@ fun ContinueCard(
                     .clickable(onClick = onPlayClick),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = stringResource(R.string.action_play),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
+                if (isBuffering) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = stringResource(if (isPlaying) R.string.action_pause else R.string.action_play),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

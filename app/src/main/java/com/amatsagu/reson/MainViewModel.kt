@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.amatsagu.reson.core.player.AudioPlayerManager
 import com.amatsagu.reson.data.SearchSuggestClient
 import com.amatsagu.reson.data.local.AvatarManager
 import com.amatsagu.reson.data.local.DatabaseManager
@@ -59,14 +60,20 @@ data class MainUiState(
     // Pagination & Infinite Scroll states
     val isFeedLoadingMore: Boolean = false,
     val canLoadMoreFeed: Boolean = true,
+    val isContinueLoadingMore: Boolean = false,
+    val canLoadMoreContinue: Boolean = true,
     val isChannelLoadingMore: Boolean = false,
     val canLoadMoreChannelVideos: Boolean = true,
     val isSearchLoadingMore: Boolean = false,
     val canLoadMoreSearch: Boolean = true,
 
-    // Mini Player State
+    // Bottom Audio Player State
     val currentPlayingVideo: Video? = null,
     val isPlaying: Boolean = false,
+    val isAudioBuffering: Boolean = false,
+    val playbackPositionMs: Long = 0L,
+    val playbackDurationMs: Long = 0L,
+    val playbackProgress: Float = 0f,
 
     // Diagnostics
     val diagnosticLogs: List<String> = emptyList(),
@@ -83,6 +90,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private var suggestJob: Job? = null
+
+    private val audioPlayerManager: AudioPlayerManager = AudioPlayerManager(
+        context = application,
+        onProgressUpdate = { video, positionMs, durationMs ->
+            viewModelScope.launch {
+                databaseManager.savePlaybackProgress(video.id, positionMs, durationMs)
+            }
+        },
+        onStreamRecoveryRequested = { video, positionMs ->
+            addLog("Stream recovery requested for ${video.title} at $positionMs ms")
+            ytDlpManager.invalidateStreamCache(video.id)
+            val freshResult = ytDlpManager.getAudioStreamUrl(video.id, forceRefresh = true)
+            if (freshResult is Result.Success) {
+                audioPlayerManager.resumeWithFreshUrl(freshResult.data, positionMs)
+            } else {
+                addLog("Stream recovery failed: ${(freshResult as Result.Failure).message}")
+            }
+        }
+    )
 
     init {
         addLog("App started. Initializing...")
@@ -111,10 +137,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe feed videos (from followed channels)
+        // Observe feed videos (from followed channels), excluding any items in continue listening
         viewModelScope.launch {
             databaseManager.observeFeedVideos().collect { videos ->
-                _uiState.update { it.copy(feedVideos = videos) }
+                _uiState.update { current ->
+                    val continueIds = current.continueVideos.map { it.id }.toSet()
+                    current.copy(feedVideos = videos.filterNot { it.id in continueIds })
+                }
             }
         }
 
@@ -131,10 +160,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe continue listening items
+        // Observe continue listening items (in-progress videos) and ensure feed excludes them
         viewModelScope.launch {
             databaseManager.observeContinueListening().collect { videos ->
-                _uiState.update { it.copy(continueVideos = videos) }
+                _uiState.update { current ->
+                    val continueIds = videos.map { it.id }.toSet()
+                    current.copy(
+                        continueVideos = videos,
+                        feedVideos = current.feedVideos.filterNot { it.id in continueIds }
+                    )
+                }
+            }
+        }
+
+        // Observe Audio Player playback state
+        viewModelScope.launch {
+            audioPlayerManager.playbackState.collect { playback ->
+                _uiState.update { current ->
+                    current.copy(
+                        isPlaying = playback.isPlaying,
+                        isAudioBuffering = playback.isBuffering,
+                        playbackPositionMs = playback.currentPositionMs,
+                        playbackDurationMs = playback.durationMs,
+                        playbackProgress = playback.progress
+                    )
+                }
             }
         }
 
@@ -351,6 +401,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Infinite scroll pagination: loads next page of feed videos from followed channels.
+     * Automatically filters out any items currently present in the continue listening list.
      */
     fun loadMoreFeedVideos() {
         val state = _uiState.value
@@ -362,12 +413,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentOffset)
 
             _uiState.update { current ->
+                val continueIds = current.continueVideos.map { it.id }.toSet()
                 val existingIds = current.feedVideos.map { it.id }.toSet()
-                val newUnique = nextBatch.filter { !existingIds.contains(it.id) }
+                val newUnique = nextBatch.filter { !existingIds.contains(it.id) && !continueIds.contains(it.id) }
                 current.copy(
                     feedVideos = current.feedVideos + newUnique,
                     isFeedLoadingMore = false,
                     canLoadMoreFeed = nextBatch.size >= PAGE_SIZE
+                )
+            }
+        }
+    }
+
+    /**
+     * Pseudo-infinite scroll pagination for continue listening horizontal carousel.
+     */
+    fun loadMoreContinueVideos() {
+        val state = _uiState.value
+        if (state.isContinueLoadingMore || !state.canLoadMoreContinue || state.continueVideos.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isContinueLoadingMore = true) }
+            val currentOffset = _uiState.value.continueVideos.size
+            val nextBatch = databaseManager.getContinueListeningVideos(limit = 10, offset = currentOffset)
+
+            _uiState.update { current ->
+                val existingIds = current.continueVideos.map { it.id }.toSet()
+                val newUnique = nextBatch.filter { !existingIds.contains(it.id) }
+                val updatedContinue = current.continueVideos + newUnique
+                val continueIds = updatedContinue.map { it.id }.toSet()
+
+                current.copy(
+                    continueVideos = updatedContinue,
+                    feedVideos = current.feedVideos.filterNot { it.id in continueIds },
+                    isContinueLoadingMore = false,
+                    canLoadMoreContinue = nextBatch.size >= 10
                 )
             }
         }
@@ -557,27 +637,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playVideo(video: Video) {
+        if (_uiState.value.currentPlayingVideo?.id == video.id) {
+            togglePlayPause()
+            return
+        }
+
         addLog("Playing video: ${video.title}")
+        val effectiveDuration = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
+
         _uiState.update {
             it.copy(
                 currentPlayingVideo = video,
-                isPlaying = true
+                isPlaying = false,
+                isAudioBuffering = true,
+                playbackPositionMs = video.playbackPositionMs,
+                playbackDurationMs = effectiveDuration,
+                playbackProgress = video.playbackProgress
             )
         }
+
         viewModelScope.launch {
-            databaseManager.upsertVideo(video)
-            databaseManager.savePlaybackProgress(
-                videoId = video.id,
-                positionMs = if (video.playbackPositionMs > 0) video.playbackPositionMs else 1000L,
-                durationMs = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
-            )
+            try {
+                databaseManager.upsertVideo(video)
+            } catch (e: Exception) {
+                addLog("Failed to upsert video on play: ${e.message}")
+            }
+            addLog("Extracting audio stream for: ${video.title}...")
+            val streamResult = ytDlpManager.getAudioStreamUrl(video.id)
+            when (streamResult) {
+                is Result.Success -> {
+                    addLog("Stream URL obtained. Starting playback...")
+                    audioPlayerManager.play(
+                        video = video,
+                        streamUrl = streamResult.data,
+                        initialPositionMs = video.playbackPositionMs
+                    )
+                }
+                is Result.Failure -> {
+                    addLog("Audio stream extraction failed: ${streamResult.message}")
+                    _uiState.update {
+                        it.copy(
+                            isAudioBuffering = false,
+                            isPlaying = false
+                        )
+                    }
+                }
+            }
         }
     }
 
     fun togglePlayPause() {
-        _uiState.update { current ->
-            current.copy(isPlaying = !current.isPlaying)
+        audioPlayerManager.togglePlayPause()
+    }
+
+    fun seekTo(positionMs: Long) {
+        audioPlayerManager.seekTo(positionMs)
+        val video = _uiState.value.currentPlayingVideo
+        if (video != null) {
+            val duration = _uiState.value.playbackDurationMs
+            viewModelScope.launch {
+                databaseManager.savePlaybackProgress(video.id, positionMs, duration)
+            }
         }
+    }
+
+    fun closePlayer() {
+        audioPlayerManager.stop()
+        _uiState.update {
+            it.copy(
+                currentPlayingVideo = null,
+                isPlaying = false,
+                isAudioBuffering = false,
+                playbackPositionMs = 0L,
+                playbackProgress = 0f
+            )
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        audioPlayerManager.release()
     }
 
     fun downloadVideo(video: Video) {

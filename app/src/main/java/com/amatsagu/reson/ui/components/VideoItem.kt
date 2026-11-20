@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -48,6 +49,8 @@ fun VideoItem(
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = false,
+    isBuffering: Boolean = false,
 ) {
     Row(
         modifier = modifier
@@ -131,6 +134,8 @@ fun VideoItem(
         DualActionCapsule(
             isDownloaded = video.isDownloaded,
             downloadProgress = video.downloadProgress,
+            isPlaying = isPlaying,
+            isBuffering = isBuffering,
             onPlayClick = onPlayClick,
             onDownloadClick = onDownloadClick
         )
@@ -144,6 +149,8 @@ fun DualActionCapsule(
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = false,
+    isBuffering: Boolean = false,
 ) {
     Row(
         modifier = modifier
@@ -159,12 +166,20 @@ fun DualActionCapsule(
                 .clickable(onClick = onPlayClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.PlayArrow,
-                contentDescription = stringResource(R.string.action_play),
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(20.dp)
-            )
+            if (isBuffering) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = stringResource(if (isPlaying) R.string.action_pause else R.string.action_play),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         Box(
