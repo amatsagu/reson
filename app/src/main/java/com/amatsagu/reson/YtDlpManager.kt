@@ -715,8 +715,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 )
 
                 val formatOptions = listOf(
-                    "ba[ext=m4a]/ba/b",
                     "bestaudio/best",
+                    "ba/b",
                     "best"
                 )
 
@@ -818,14 +818,14 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 if (streamResult is Result.Success) {
                     val streamUrl = streamResult.data
                     val tempFile = File(downloadsDir, "$videoId.download")
-                    val finalFile = File(downloadsDir, "$videoId.m4a")
                     try {
                         Log.d(TAG, "Attempting direct stream download for $videoId...")
-                        val ok = downloadStreamToFile(streamUrl, tempFile, onProgress)
-                        if (ok && tempFile.exists() && tempFile.length() > 1024) {
+                        val detectedExt = downloadStreamToFile(streamUrl, tempFile, onProgress)
+                        if (detectedExt != null && tempFile.exists() && tempFile.length() > 1024) {
+                            val finalFile = File(downloadsDir, "$videoId.$detectedExt")
                             if (finalFile.exists()) finalFile.delete()
                             if (tempFile.renameTo(finalFile)) {
-                                Log.i(TAG, "Direct stream download successful: ${finalFile.name} (${finalFile.length() / 1024} KB)")
+                                Log.i(TAG, "Direct stream download successful: ${finalFile.name} (${finalFile.length() / 1024} KB, format: $detectedExt)")
                                 onProgress(1f)
                                 return@executeQueued Result.Success(finalFile)
                             }
@@ -849,7 +849,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 for (clientArg in clientOptions) {
                     try {
                         val request = YoutubeDLRequest(videoUrl).apply {
-                            addOption("-f", "ba[ext=m4a]/ba/b")
+                            addOption("-f", "bestaudio/best")
                             addOption("-o", outputTemplate)
                             addOption("--no-playlist")
                             addOption("--no-warnings")
@@ -869,7 +869,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         }?.firstOrNull { it.length() > 1024 }
 
                         if (downloadedTemp != null && downloadedTemp.exists()) {
-                            val finalFile = File(downloadsDir, "$videoId.m4a")
+                            val ext = downloadedTemp.extension.ifBlank { "webm" }
+                            val finalFile = File(downloadsDir, "$videoId.$ext")
                             if (finalFile.exists()) finalFile.delete()
                             if (downloadedTemp.renameTo(finalFile)) {
                                 Log.i(TAG, "yt-dlp download successful: ${finalFile.name} (${finalFile.length() / 1024} KB)")
@@ -915,11 +916,24 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
     }
 
+    private fun detectAudioExtension(contentType: String?, url: String): String {
+        val ct = contentType?.lowercase() ?: ""
+        val u = url.lowercase()
+        return when {
+            ct.contains("webm") || u.contains("mime=audio%2fwebm") || u.contains("mime=audio/webm") -> "webm"
+            ct.contains("mp4") || ct.contains("m4a") || u.contains("mime=audio%2fmp4") || u.contains("mime=audio/mp4") -> "m4a"
+            ct.contains("opus") -> "opus"
+            ct.contains("ogg") -> "ogg"
+            ct.contains("mp3") || ct.contains("mpeg") -> "mp3"
+            else -> "webm"
+        }
+    }
+
     private fun downloadStreamToFile(
         streamUrl: String,
         destFile: File,
         onProgress: (Float) -> Unit
-    ): Boolean {
+    ): String? {
         var currentUrl = streamUrl
         var redirectCount = 0
         while (redirectCount < 5) {
@@ -951,6 +965,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 throw java.io.IOException("HTTP $code from stream server")
             }
 
+            val contentType = connection.contentType
+            val detectedExt = detectAudioExtension(contentType, currentUrl)
             val totalBytes = connection.contentLengthLong
             connection.inputStream.use { input ->
                 destFile.outputStream().use { output ->
@@ -971,9 +987,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
             }
             connection.disconnect()
-            return destFile.exists() && destFile.length() > 0
+            return if (destFile.exists() && destFile.length() > 0) detectedExt else null
         }
-        return false
+        return null
     }
 
     /**

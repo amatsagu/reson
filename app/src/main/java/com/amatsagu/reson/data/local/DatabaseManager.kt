@@ -490,7 +490,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
             downloadedFilesSize += downloadsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         }
         appContext.filesDir.listFiles()?.filter {
-            it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a"))
+            it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a") || it.name.endsWith(".webm") || it.name.endsWith(".opus"))
         }?.forEach {
             downloadedFilesSize += it.length()
         }
@@ -532,7 +532,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
                 val downloadsDir = File(appContext.filesDir, "downloads")
                 downloadsDir.listFiles()?.forEach { it.delete() }
                 appContext.filesDir.listFiles()?.filter {
-                    it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a"))
+                    it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a") || it.name.endsWith(".webm") || it.name.endsWith(".opus"))
                 }?.forEach { it.delete() }
             } catch (e: Exception) {
                 Log.w("DatabaseManager", "Failed to clear media files: ${e.message}")
