@@ -76,6 +76,8 @@ fun LibraryScreen(
     onDownloadVideo: (Video) -> Unit,
     onClearHistory: () -> Unit,
     contentPadding: PaddingValues,
+    queuedDownloadIds: Set<String> = emptySet(),
+    downloadingProgressMap: Map<String, Float> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     var subView by remember { mutableStateOf(LibrarySubView.Overview) }
@@ -98,6 +100,8 @@ fun LibraryScreen(
                 onDownloadVideo = onDownloadVideo,
                 onShowFullHistory = { subView = LibrarySubView.FullHistory },
                 onShowFullDownloads = { subView = LibrarySubView.FullDownloads },
+                queuedDownloadIds = queuedDownloadIds,
+                downloadingProgressMap = downloadingProgressMap,
                 contentPadding = contentPadding,
                 modifier = modifier
             )
@@ -126,6 +130,8 @@ fun LibraryScreen(
                         }
                     }
                 },
+                queuedDownloadIds = queuedDownloadIds,
+                downloadingProgressMap = downloadingProgressMap,
                 contentPadding = contentPadding,
                 modifier = modifier
             )
@@ -144,6 +150,8 @@ fun LibraryScreen(
                 emptyTitle = stringResource(R.string.library_downloads_empty_title),
                 emptyDesc = stringResource(R.string.library_downloads_empty_desc),
                 headerAction = null,
+                queuedDownloadIds = queuedDownloadIds,
+                downloadingProgressMap = downloadingProgressMap,
                 contentPadding = contentPadding,
                 modifier = modifier
             )
@@ -207,6 +215,8 @@ private fun LibraryOverviewView(
     onShowFullHistory: () -> Unit,
     onShowFullDownloads: () -> Unit,
     contentPadding: PaddingValues,
+    queuedDownloadIds: Set<String> = emptySet(),
+    downloadingProgressMap: Map<String, Float> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     val top5History = remember(historyVideos) { historyVideos.take(5) }
@@ -244,10 +254,14 @@ private fun LibraryOverviewView(
             ) { video ->
                 val isVideoPlaying = video.id == currentPlayingVideoId && isPlaying
                 val isVideoBuffering = video.id == currentPlayingVideoId && isAudioBuffering
+                val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                 VideoItem(
                     video = video,
                     isPlaying = isVideoPlaying,
                     isBuffering = isVideoBuffering,
+                    isQueued = isQueued,
+                    downloadProgress = activeProgress,
                     onPlayClick = { onPlayVideo(video) },
                     onDownloadClick = { onDownloadVideo(video) },
                     modifier = Modifier.padding(horizontal = 16.dp)
@@ -307,10 +321,14 @@ private fun LibraryOverviewView(
             ) { video ->
                 val isVideoPlaying = video.id == currentPlayingVideoId && isPlaying
                 val isVideoBuffering = video.id == currentPlayingVideoId && isAudioBuffering
+                val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                 VideoItem(
                     video = video,
                     isPlaying = isVideoPlaying,
                     isBuffering = isVideoBuffering,
+                    isQueued = isQueued,
+                    downloadProgress = activeProgress,
                     onPlayClick = { onPlayVideo(video) },
                     onDownloadClick = { onDownloadVideo(video) },
                     modifier = Modifier.padding(horizontal = 16.dp)
@@ -356,6 +374,8 @@ private fun FullListView(
     emptyDesc: String,
     headerAction: (@Composable () -> Unit)?,
     contentPadding: PaddingValues,
+    queuedDownloadIds: Set<String> = emptySet(),
+    downloadingProgressMap: Map<String, Float> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -425,10 +445,14 @@ private fun FullListView(
                 ) { video ->
                     val isVideoPlaying = video.id == currentPlayingVideoId && isPlaying
                     val isVideoBuffering = video.id == currentPlayingVideoId && isAudioBuffering
+                    val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                    val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                     VideoItem(
                         video = video,
                         isPlaying = isVideoPlaying,
                         isBuffering = isVideoBuffering,
+                        isQueued = isQueued,
+                        downloadProgress = activeProgress,
                         onPlayClick = { onPlayVideo(video) },
                         onDownloadClick = { onDownloadVideo(video) },
                         modifier = Modifier.padding(horizontal = 16.dp)

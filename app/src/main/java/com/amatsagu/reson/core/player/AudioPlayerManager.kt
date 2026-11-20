@@ -9,6 +9,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -60,6 +61,7 @@ class AudioPlayerManager(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val networkMonitor = NetworkMonitor.getInstance(context)
     private var tickerJob: Job? = null
+    private var isPlayingLocal = false
     private var lastSavedPositionMs = 0L
     private var recoveryAttempts = 0
     private var isRecovering = false
@@ -106,8 +108,10 @@ class AudioPlayerManager(
             }
         }
 
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(httpDataSourceFactory)
+            .setDataSourceFactory(dataSourceFactory)
             .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
 
         ExoPlayer.Builder(context)
@@ -191,6 +195,17 @@ class AudioPlayerManager(
             Log.e(TAG, "ExoPlayer playback error (code ${error.errorCode}): ${error.message}", error)
             stopProgressTicker()
 
+            if (isPlayingLocal) {
+                _playbackState.update {
+                    it.copy(
+                        isPlaying = false,
+                        isBuffering = false,
+                        errorMessage = error.message ?: "Local audio error"
+                    )
+                }
+                return
+            }
+
             // If offline, pause and await network restoration instead of exhausting recovery attempts
             if (!networkMonitor.isOnline()) {
                 Log.w(TAG, "Playback error occurred while offline. Waiting for network connection...")
@@ -249,6 +264,10 @@ class AudioPlayerManager(
     }
 
     private fun handleNetworkTransition(transition: NetworkTransition) {
+        if (isPlayingLocal) {
+            Log.d(TAG, "Ignoring network transition ${transition::class.simpleName} during local file playback")
+            return
+        }
         when (transition) {
             is NetworkTransition.Lost -> {
                 Log.w(TAG, "AudioPlayer observed network LOST (was ${transition.lastState.displayName})")
@@ -278,6 +297,7 @@ class AudioPlayerManager(
     }
 
     private fun triggerSmartNetworkRecovery(networkDisplayName: String) {
+        if (isPlayingLocal) return
         val video = _playbackState.value.currentVideo ?: return
         val shouldRecover = wasPlayingBeforeNetworkLoss ||
                 exoPlayer.isPlaying ||
@@ -319,11 +339,12 @@ class AudioPlayerManager(
     }
 
     /**
-     * Prepares and streams audio from direct HTTP stream URL with atomic start position.
+     * Prepares and streams audio from direct HTTP stream URL or local file URI with atomic start position.
      */
-    fun play(video: Video, streamUrl: String, initialPositionMs: Long = 0L) {
+    fun play(video: Video, mediaUri: String, isLocal: Boolean = false, initialPositionMs: Long = 0L) {
         scope.launch {
             try {
+                isPlayingLocal = isLocal
                 recoveryAttempts = 0
                 isRecovering = false
                 continuousBufferingMs = 0L
@@ -346,7 +367,7 @@ class AudioPlayerManager(
                 }
 
                 val mediaItem = MediaItem.Builder()
-                    .setUri(streamUrl)
+                    .setUri(mediaUri)
                     .setMediaId(video.id)
                     .build()
 
@@ -355,7 +376,7 @@ class AudioPlayerManager(
                 exoPlayer.prepare()
                 exoPlayer.play()
                 startProgressTicker()
-                Log.d(TAG, "Streaming initialized for '${video.title}' starting at $safePosition ms")
+                Log.d(TAG, "Playback initialized for '${video.title}' (isLocal=$isLocal) starting at $safePosition ms")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start playback for ${video.id}", e)
                 _playbackState.update {

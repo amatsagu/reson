@@ -45,6 +45,7 @@ class DatabaseModelTest {
         assertEquals(900_000L, video.playbackDurationMs)
         assertEquals(1700000000L, video.lastPlayedAt)
         assertFalse(video.isDownloaded)
+        org.junit.Assert.assertNull(video.downloadFilePath)
     }
 
     @Test

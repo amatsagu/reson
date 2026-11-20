@@ -51,6 +51,8 @@ fun VideoItem(
     modifier: Modifier = Modifier,
     isPlaying: Boolean = false,
     isBuffering: Boolean = false,
+    downloadProgress: Float? = video.downloadProgress,
+    isQueued: Boolean = video.isDownloadQueued,
 ) {
     Row(
         modifier = modifier
@@ -131,9 +133,13 @@ fun VideoItem(
             }
         }
 
+        val effectiveProgress = downloadProgress ?: video.downloadProgress
+        val effectiveQueued = isQueued || video.isDownloadQueued
+
         DualActionCapsule(
             isDownloaded = video.isDownloaded,
-            downloadProgress = video.downloadProgress,
+            downloadProgress = effectiveProgress,
+            isQueued = effectiveQueued,
             isPlaying = isPlaying,
             isBuffering = isBuffering,
             onPlayClick = onPlayClick,
@@ -146,6 +152,7 @@ fun VideoItem(
 fun DualActionCapsule(
     isDownloaded: Boolean,
     downloadProgress: Float?,
+    isQueued: Boolean = false,
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -203,6 +210,14 @@ fun DualActionCapsule(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.outlineVariant
+                    )
+                }
+                isQueued -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                         trackColor = MaterialTheme.colorScheme.outlineVariant
                     )
                 }

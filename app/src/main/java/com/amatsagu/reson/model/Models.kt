@@ -21,6 +21,8 @@ data class Video(
     val playbackProgress: Float = 0f,
     val isDownloaded: Boolean = false,
     val downloadProgress: Float? = null,
+    val downloadFilePath: String? = null,
+    val isDownloadQueued: Boolean = false,
     val channelId: String = "",
     val playbackPositionMs: Long = 0L,
     val playbackDurationMs: Long = 0L,

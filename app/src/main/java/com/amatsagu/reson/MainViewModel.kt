@@ -97,6 +97,10 @@ data class MainUiState(
     val networkHintMessage: String? = null,
     val playbackErrorMessage: String? = null,
     val isNetworkBannerDismissed: Boolean = false,
+
+    // In-memory download queue & progress state
+    val queuedDownloadIds: Set<String> = emptySet(),
+    val downloadingProgressMap: Map<String, Float> = emptyMap(),
 ) {
     /**
      * Reassuring inline player status hint for users during stalls, slow connections, or blocks.
@@ -169,11 +173,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _databaseStats = MutableStateFlow<DatabaseStats?>(null)
     val databaseStats: StateFlow<DatabaseStats?> = _databaseStats.asStateFlow()
 
+    // In-memory sequential download queue & active execution
+    private val downloadQueueList = mutableListOf<Video>()
+    private var activeDownloadJob: Job? = null
+    private var activeDownloadVideo: Video? = null
+
     init {
         addLog("App started. Initializing...")
 
-        // Initial database stats load
+        // Initial database stats load and clean missing offline files
         refreshDatabaseStats()
+        viewModelScope.launch(ResonDispatchers.Database) {
+            databaseManager.syncDownloadedState()
+        }
 
         // Progress persistence single worker: consumes updates on bounded Database dispatcher
         viewModelScope.launch(ResonDispatchers.Database) {
@@ -821,6 +833,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         playJob?.cancel()
         playWatchdogJob?.cancel()
+
+        // 1. Check if video has a local downloaded file on disk -> PRIORITIZE INSTANT LOCAL PLAYBACK
+        val localFile = databaseManager.getDownloadedFile(video.id)
+        if (localFile != null && localFile.exists() && localFile.length() > 0) {
+            addLog("Prioritizing local offline audio for: ${video.title} (${localFile.length() / 1024} KB)")
+            val localVideo = video.copy(
+                isDownloaded = true,
+                downloadFilePath = localFile.absolutePath,
+                playbackDurationMs = effectiveDuration
+            )
+            _uiState.update {
+                it.copy(
+                    currentPlayingVideo = localVideo,
+                    isPlaying = false,
+                    isAudioBuffering = true,
+                    playbackPositionMs = video.playbackPositionMs,
+                    playbackDurationMs = effectiveDuration,
+                    playbackProgress = video.playbackProgress,
+                    networkHintMessage = null,
+                    playbackErrorMessage = null
+                )
+            }
+            viewModelScope.launch(ResonDispatchers.Database) {
+                databaseManager.upsertVideo(localVideo)
+            }
+            audioPlayerManager.play(
+                video = localVideo,
+                mediaUri = android.net.Uri.fromFile(localFile).toString(),
+                isLocal = true,
+                initialPositionMs = video.playbackPositionMs
+            )
+            return
+        }
+
+        // 2. Otherwise proceed with online streaming extraction
         val isOffline = !com.amatsagu.reson.core.network.NetworkMonitor.getInstance(getApplication()).isOnline()
         val initialHint = if (isOffline) "No internet connection. Waiting for network…" else null
 
@@ -870,7 +917,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     addLog("Stream URL obtained. Starting playback...")
                     audioPlayerManager.play(
                         video = video,
-                        streamUrl = streamResult.data,
+                        mediaUri = streamResult.data,
+                        isLocal = false,
                         initialPositionMs = video.playbackPositionMs
                     )
                 }
@@ -928,17 +976,123 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         progressChannel.close()
+        activeDownloadJob?.cancel()
+        activeDownloadVideo?.let { ytDlpManager.cancelDownload(it.id) }
+        synchronized(downloadQueueList) {
+            downloadQueueList.clear()
+        }
         audioPlayerManager.release()
     }
 
     fun downloadVideo(video: Video) {
-        viewModelScope.launch(ResonDispatchers.Database) {
-            val newStatus = !video.isDownloaded
-            val filePath = if (newStatus) "offline_${video.id}.mp3" else null
-            databaseManager.upsertVideo(video.copy(isDownloaded = newStatus))
-            databaseManager.updateDownloadStatus(video.id, newStatus, filePath)
-            addLog("Toggled download status for ${video.title}: isDownloaded=$newStatus")
-            refreshDatabaseStats()
+        val videoId = video.id
+
+        // 1. If currently downloading, cancel it and trigger next in queue
+        if (activeDownloadVideo?.id == videoId) {
+            addLog("Cancelling active download: ${video.title}")
+            activeDownloadJob?.cancel()
+            ytDlpManager.cancelDownload(videoId)
+            _uiState.update {
+                it.copy(downloadingProgressMap = it.downloadingProgressMap - videoId)
+            }
+            activeDownloadJob = null
+            activeDownloadVideo = null
+            triggerNextDownload()
+            return
+        }
+
+        // 2. If waiting in the in-memory queue, remove it immediately
+        synchronized(downloadQueueList) {
+            val removed = downloadQueueList.removeAll { it.id == videoId }
+            if (removed) {
+                _uiState.update {
+                    it.copy(queuedDownloadIds = it.queuedDownloadIds - videoId)
+                }
+                addLog("Removed from download queue: ${video.title}")
+                return
+            }
+        }
+
+        // 3. If already downloaded, delete the offline file from disk and update DB
+        if (video.isDownloaded || databaseManager.getDownloadedFile(videoId) != null) {
+            viewModelScope.launch(ResonDispatchers.Database) {
+                databaseManager.deleteDownloadedFile(videoId)
+                addLog("Deleted offline download for: ${video.title}")
+                refreshDatabaseStats()
+            }
+            return
+        }
+
+        // 4. Otherwise enqueue or start download immediately
+        synchronized(downloadQueueList) {
+            if (activeDownloadVideo == null) {
+                startDownload(video)
+            } else {
+                downloadQueueList.add(video)
+                _uiState.update {
+                    it.copy(queuedDownloadIds = it.queuedDownloadIds + videoId)
+                }
+                addLog("Queued for download (#${downloadQueueList.size}): ${video.title}")
+            }
+        }
+    }
+
+    private fun startDownload(video: Video) {
+        val videoId = video.id
+        activeDownloadVideo = video
+        // Immediately give clear feedback: 0.01f progress
+        _uiState.update {
+            it.copy(
+                queuedDownloadIds = it.queuedDownloadIds - videoId,
+                downloadingProgressMap = it.downloadingProgressMap + (videoId to 0.01f)
+            )
+        }
+        addLog("Starting download: ${video.title}...")
+
+        activeDownloadJob = viewModelScope.launch(ResonDispatchers.Network) {
+            try {
+                val result = ytDlpManager.downloadAudio(videoId) { progress ->
+                    _uiState.update {
+                        it.copy(downloadingProgressMap = it.downloadingProgressMap + (videoId to progress))
+                    }
+                }
+                when (result) {
+                    is Result.Success -> {
+                        val file = result.data
+                        // ONLY commit to SQLite upon complete, verified disk write
+                        databaseManager.upsertVideo(video.copy(isDownloaded = true, downloadFilePath = file.absolutePath))
+                        databaseManager.updateDownloadStatus(videoId, isDownloaded = true, filePath = file.absolutePath)
+                        addLog("Downloaded ${video.title} (${file.length() / 1024} KB)")
+                        refreshDatabaseStats()
+                    }
+                    is Result.Failure -> {
+                        addLog("Download failed for ${video.title}: ${result.message}")
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                addLog("Download cancelled: ${video.title}")
+                ytDlpManager.cancelDownload(videoId)
+                throw e
+            } catch (e: Throwable) {
+                addLog("Download error for ${video.title}: ${e.message}")
+            } finally {
+                _uiState.update {
+                    it.copy(downloadingProgressMap = it.downloadingProgressMap - videoId)
+                }
+                activeDownloadVideo = null
+                activeDownloadJob = null
+                triggerNextDownload()
+            }
+        }
+    }
+
+    private fun triggerNextDownload() {
+        if (activeDownloadVideo != null) return
+        val nextVideo = synchronized(downloadQueueList) {
+            if (downloadQueueList.isNotEmpty()) downloadQueueList.removeAt(0) else null
+        }
+        if (nextVideo != null) {
+            startDownload(nextVideo)
         }
     }
 

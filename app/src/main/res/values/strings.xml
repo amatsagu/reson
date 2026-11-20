@@ -18,6 +18,8 @@
     <string name="action_pause">Pause</string>
     <string name="action_download">Download</string>
     <string name="action_downloaded">Downloaded</string>
+    <string name="action_download_queued">Queued for download</string>
+    <string name="action_downloading">Downloading</string>
     <string name="action_follow">Follow</string>
     <string name="action_following">Following</string>
     <string name="action_unfollow">Unfollow</string>

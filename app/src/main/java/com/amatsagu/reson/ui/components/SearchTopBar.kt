@@ -137,6 +137,8 @@ fun SearchOverlay(
     onPlayVideo: (Video) -> Unit,
     onDownloadVideo: (Video) -> Unit,
     onFollowChannel: (Channel) -> Unit,
+    queuedDownloadIds: Set<String> = emptySet(),
+    downloadingProgressMap: Map<String, Float> = emptyMap(),
     contentPadding: PaddingValues = PaddingValues(0.dp),
     modifier: Modifier = Modifier,
 ) {
@@ -448,10 +450,14 @@ fun SearchOverlay(
                                     is SearchResultItem.Video -> {
                                         val isPlaying = item.video.id == currentPlayingVideoId && isPlaybackActive
                                         val isBuffering = item.video.id == currentPlayingVideoId && isAudioBuffering
+                                        val isQueued = item.video.id in queuedDownloadIds || item.video.isDownloadQueued
+                                        val activeProgress = downloadingProgressMap[item.video.id] ?: item.video.downloadProgress
                                         VideoItem(
                                             video = item.video,
                                             isPlaying = isPlaying,
                                             isBuffering = isBuffering,
+                                            isQueued = isQueued,
+                                            downloadProgress = activeProgress,
                                             onPlayClick = { onPlayVideo(item.video) },
                                             onDownloadClick = { onDownloadVideo(item.video) }
                                         )

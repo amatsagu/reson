@@ -286,6 +286,68 @@ class DatabaseManager private constructor(private val appContext: Context) {
      * ------------------------------------------------------------------------- */
 
     /**
+     * Finds the real downloaded audio file on disk for the given videoId, if present and non-empty.
+     */
+    fun getDownloadedFile(videoId: String): File? {
+        val db = dbHelper.readableDatabase
+        val dbVideo = videoDao.getVideoById(db, videoId)
+        val path = dbVideo?.downloadFilePath
+        if (!path.isNullOrBlank()) {
+            val file = File(path)
+            if (file.exists() && file.length() > 0) {
+                return file
+            }
+        }
+
+        val downloadsDir = File(appContext.filesDir, "downloads")
+        if (downloadsDir.exists()) {
+            val file = downloadsDir.listFiles { _, name ->
+                name.startsWith(videoId) && !name.endsWith(".part") && !name.endsWith(".download") && !name.endsWith(".ytdl")
+            }?.firstOrNull { it.length() > 0 }
+            if (file != null) return file
+        }
+
+        val fallback = File(appContext.filesDir, "offline_${videoId}.mp3")
+        if (fallback.exists() && fallback.length() > 0) {
+            return fallback
+        }
+
+        return null
+    }
+
+    /**
+     * Deletes the local offline file and resets SQLite download state.
+     */
+    suspend fun deleteDownloadedFile(videoId: String): Boolean = withContext(dispatcher) {
+        val file = getDownloadedFile(videoId)
+        var fileDeleted = false
+        if (file != null && file.exists()) {
+            fileDeleted = file.delete()
+        }
+        val dbSuccess = updateDownloadStatus(videoId, isDownloaded = false, filePath = null)
+        fileDeleted || dbSuccess
+    }
+
+    /**
+     * Scans SQLite downloaded records and clears any ghost entries whose local files are missing on disk.
+     */
+    suspend fun syncDownloadedState(): Unit = withContext(dispatcher) {
+        val db = dbHelper.writableDatabase
+        val downloaded = videoDao.getDownloadedVideos(db, 500)
+        var changed = false
+        for (v in downloaded) {
+            val file = getDownloadedFile(v.id)
+            if (file == null || !file.exists() || file.length() == 0L) {
+                videoDao.updateDownloadStatus(db, v.id, isDownloaded = false, filePath = null)
+                changed = true
+            }
+        }
+        if (changed) {
+            notifyVideoChanged()
+        }
+    }
+
+    /**
      * Updates download status and stored file path.
      */
     suspend fun updateDownloadStatus(
@@ -409,7 +471,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Clears all channels, videos, and search history tables.
+     * Clears all channels, videos, and search history tables, and wipes downloaded media files.
      */
     suspend fun clearAll(): Unit = withContext(dispatcher) {
         mutex.withLock {
@@ -422,6 +484,15 @@ class DatabaseManager private constructor(private val appContext: Context) {
                 db.setTransactionSuccessful()
             } finally {
                 db.endTransaction()
+            }
+            try {
+                val downloadsDir = File(appContext.filesDir, "downloads")
+                downloadsDir.listFiles()?.forEach { it.delete() }
+                appContext.filesDir.listFiles()?.filter {
+                    it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a"))
+                }?.forEach { it.delete() }
+            } catch (e: Exception) {
+                Log.w("DatabaseManager", "Failed to clear media files: ${e.message}")
             }
         }
         notifyChannelChanged()

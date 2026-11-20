@@ -784,6 +784,183 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
+     * Downloads the best audio stream for offline playback into internal storage.
+     * Uses fast direct HTTP stream download with native yt-dlp fallback.
+     */
+    suspend fun downloadAudio(
+        videoId: String,
+        onProgress: (Float) -> Unit = {}
+    ): Result<File> = withContext(networkDispatcher) {
+        val downloadsDir = File(appContext.filesDir, "downloads")
+        if (!downloadsDir.exists()) downloadsDir.mkdirs()
+
+        // 1. Check if already completely downloaded on disk
+        val existing = downloadsDir.listFiles { _, name ->
+            name.startsWith(videoId) && !name.endsWith(".part") && !name.endsWith(".download") && !name.endsWith(".ytdl")
+        }?.firstOrNull { it.length() > 0 }
+        if (existing != null) {
+            Log.d(TAG, "Audio already downloaded for $videoId: ${existing.name} (${existing.length()} bytes)")
+            onProgress(1f)
+            return@withContext Result.Success(existing)
+        }
+
+        executeQueued(TaskPriority.IMMEDIATE, "Download:$videoId") {
+            try {
+                ensureReady()
+
+                // Strategy 1: Direct stream URL download (fast, reliable, smooth progress)
+                val streamResult = getAudioStreamUrl(videoId, forceRefresh = false, priority = TaskPriority.IMMEDIATE)
+                if (streamResult is Result.Success) {
+                    val streamUrl = streamResult.data
+                    val tempFile = File(downloadsDir, "$videoId.download")
+                    val finalFile = File(downloadsDir, "$videoId.m4a")
+                    try {
+                        Log.d(TAG, "Attempting direct stream download for $videoId...")
+                        val ok = downloadStreamToFile(streamUrl, tempFile, onProgress)
+                        if (ok && tempFile.exists() && tempFile.length() > 0) {
+                            if (finalFile.exists()) finalFile.delete()
+                            if (tempFile.renameTo(finalFile)) {
+                                Log.i(TAG, "Direct stream download successful: ${finalFile.name} (${finalFile.length() / 1024} KB)")
+                                onProgress(1f)
+                                return@executeQueued Result.Success(finalFile)
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "Direct stream download failed for $videoId: ${e.message}. Falling back to yt-dlp downloader.")
+                        if (tempFile.exists()) tempFile.delete()
+                    }
+                }
+
+                // Strategy 2: Native yt-dlp download execution
+                val videoUrl = if (videoId.startsWith("http")) videoId else "https://www.youtube.com/watch?v=$videoId"
+                val outputTemplate = File(downloadsDir, "$videoId.%(ext)s").absolutePath
+                val clientOptions = listOf(
+                    "youtube:player_client=android,web",
+                    "youtube:player_client=ios,web",
+                    ""
+                )
+
+                var lastError: Throwable? = null
+                for (clientArg in clientOptions) {
+                    try {
+                        val request = YoutubeDLRequest(videoUrl).apply {
+                            addOption("-f", "ba[ext=m4a]/ba/b")
+                            addOption("-o", outputTemplate)
+                            addOption("--no-playlist")
+                            addOption("--no-warnings")
+                            addOption("--no-part")
+                            if (clientArg.isNotBlank()) {
+                                addOption("--extractor-args", clientArg)
+                            }
+                        }
+                        val processId = "dl_$videoId"
+                        Log.d(TAG, "Executing yt-dlp download for $videoId (client: '$clientArg')...")
+                        YoutubeDL.getInstance().execute(request, processId) { progress, _, _ ->
+                            val normalized = (progress / 100f).coerceIn(0f, 1f)
+                            onProgress(normalized)
+                        }
+
+                        val downloadedFile = downloadsDir.listFiles { _, name ->
+                            name.startsWith(videoId) && !name.endsWith(".part") && !name.endsWith(".download") && !name.endsWith(".ytdl")
+                        }?.firstOrNull { it.length() > 0 }
+
+                        if (downloadedFile != null && downloadedFile.exists()) {
+                            Log.i(TAG, "yt-dlp download successful: ${downloadedFile.name} (${downloadedFile.length() / 1024} KB)")
+                            onProgress(1f)
+                            return@executeQueued Result.Success(downloadedFile)
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "yt-dlp download failed with client '$clientArg': ${e.message}")
+                        lastError = e
+                        if (isRateLimitError(e)) break
+                    }
+                }
+
+                val err = lastError ?: IllegalStateException("Download file not found on disk")
+                Result.Failure(err, err.message ?: "Failed to download audio file")
+            } catch (e: Throwable) {
+                Log.e(TAG, "Unexpected error in downloadAudio for $videoId", e)
+                Result.Failure(e, e.message ?: "Download failed")
+            }
+        }
+    }
+
+    /**
+     * Cancels an ongoing download process and cleans up any temp download files.
+     */
+    fun cancelDownload(videoId: String) {
+        try {
+            YoutubeDL.getInstance().destroyProcessById("dl_$videoId")
+            val downloadsDir = File(appContext.filesDir, "downloads")
+            val tempFile = File(downloadsDir, "$videoId.download")
+            if (tempFile.exists()) tempFile.delete()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to cancel download for $videoId", e)
+        }
+    }
+
+    private fun downloadStreamToFile(
+        streamUrl: String,
+        destFile: File,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        var currentUrl = streamUrl
+        var redirectCount = 0
+        while (redirectCount < 5) {
+            val connection = java.net.URL(currentUrl).openConnection() as java.net.HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            )
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+
+            val code = connection.responseCode
+            if (code == java.net.HttpURLConnection.HTTP_MOVED_PERM ||
+                code == java.net.HttpURLConnection.HTTP_MOVED_TEMP ||
+                code == 307 || code == 308
+            ) {
+                val loc = connection.getHeaderField("Location")
+                if (!loc.isNullOrBlank()) {
+                    currentUrl = loc
+                    redirectCount++
+                    connection.disconnect()
+                    continue
+                }
+            }
+
+            if (code !in 200..299) {
+                connection.disconnect()
+                throw java.io.IOException("HTTP $code from stream server")
+            }
+
+            val totalBytes = connection.contentLengthLong
+            connection.inputStream.use { input ->
+                destFile.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var bytesRead = 0L
+                    var read: Int
+                    var lastUpdate = 0L
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        bytesRead += read
+                        val now = System.currentTimeMillis()
+                        if (totalBytes > 0 && now - lastUpdate > 100) {
+                            lastUpdate = now
+                            onProgress((bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 0.99f))
+                        }
+                    }
+                    output.flush()
+                }
+            }
+            connection.disconnect()
+            return destFile.exists() && destFile.length() > 0
+        }
+        return false
+    }
+
+    /**
      * Executes custom yt-dlp arguments and returns the raw response.
      */
     suspend fun executeRaw(

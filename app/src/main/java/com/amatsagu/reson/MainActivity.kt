@@ -158,6 +158,8 @@ fun ResonApp(viewModel: MainViewModel) {
                             onDownloadVideo = { viewModel.downloadVideo(it) },
                             onLoadMore = { viewModel.loadMoreChannelVideos() },
                             onSearchClick = { viewModel.openSearch() },
+                            queuedDownloadIds = uiState.queuedDownloadIds,
+                            downloadingProgressMap = uiState.downloadingProgressMap,
                             contentPadding = innerPadding
                         )
                     }
@@ -171,6 +173,8 @@ fun ResonApp(viewModel: MainViewModel) {
                             onPlayVideo = { viewModel.playVideo(it) },
                             onDownloadVideo = { viewModel.downloadVideo(it) },
                             onClearHistory = { viewModel.clearPlaybackHistory() },
+                            queuedDownloadIds = uiState.queuedDownloadIds,
+                            downloadingProgressMap = uiState.downloadingProgressMap,
                             contentPadding = innerPadding
                         )
                     }
@@ -215,6 +219,8 @@ fun ResonApp(viewModel: MainViewModel) {
                     onPlayVideo = { viewModel.playVideo(it) },
                     onDownloadVideo = { viewModel.downloadVideo(it) },
                     onFollowChannel = { viewModel.toggleFollowChannel(it) },
+                    queuedDownloadIds = uiState.queuedDownloadIds,
+                    downloadingProgressMap = uiState.downloadingProgressMap,
                     contentPadding = innerPadding
                 )
 
@@ -340,10 +346,14 @@ fun FeedScreen(
                     ) { video ->
                         val isPlaying = video.id == uiState.currentPlayingVideo?.id && uiState.isPlaying
                         val isBuffering = video.id == uiState.currentPlayingVideo?.id && uiState.isAudioBuffering
+                        val isQueued = video.id in uiState.queuedDownloadIds || video.isDownloadQueued
+                        val activeProgress = uiState.downloadingProgressMap[video.id] ?: video.downloadProgress
                         VideoItem(
                             video = video,
                             isPlaying = isPlaying,
                             isBuffering = isBuffering,
+                            isQueued = isQueued,
+                            downloadProgress = activeProgress,
                             onPlayClick = { onPlayVideo(video) },
                             onDownloadClick = { onDownloadVideo(video) },
                             modifier = Modifier.padding(horizontal = 16.dp)
@@ -501,6 +511,8 @@ fun ChannelsScreen(
     onLoadMore: () -> Unit,
     onSearchClick: () -> Unit,
     contentPadding: PaddingValues,
+    queuedDownloadIds: Set<String> = emptySet(),
+    downloadingProgressMap: Map<String, Float> = emptyMap(),
 ) {
     val listState = rememberLazyListState()
 
@@ -660,10 +672,14 @@ fun ChannelsScreen(
                 ) { video ->
                     val isPlaying = video.id == currentPlayingVideoId && isPlaybackActive
                     val isBuffering = video.id == currentPlayingVideoId && isAudioBuffering
+                    val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                    val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                     VideoItem(
                         video = video,
                         isPlaying = isPlaying,
                         isBuffering = isBuffering,
+                        isQueued = isQueued,
+                        downloadProgress = activeProgress,
                         onPlayClick = { onPlayVideo(video) },
                         onDownloadClick = { onDownloadVideo(video) },
                         modifier = Modifier.padding(horizontal = 16.dp)

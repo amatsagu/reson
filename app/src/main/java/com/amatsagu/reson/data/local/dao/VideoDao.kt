@@ -28,6 +28,9 @@ class VideoDao {
                 }
                 if (!video.isDownloaded && existing.isDownloaded) {
                     values.put("is_downloaded", 1)
+                    if (existing.downloadFilePath != null) {
+                        values.put("download_file_path", existing.downloadFilePath)
+                    }
                 }
             }
             db.update("videos", values, "id = ?", arrayOf(video.id))
@@ -239,6 +242,9 @@ class VideoDao {
             put("playback_duration_ms", video.playbackDurationMs)
             put("last_played_at", if (video.lastPlayedAt > 0) video.lastPlayedAt else 0L)
             put("is_downloaded", if (video.isDownloaded) 1 else 0)
+            if (video.downloadFilePath != null) {
+                put("download_file_path", video.downloadFilePath)
+            }
             put("created_at", System.currentTimeMillis())
         }
     }
@@ -246,6 +252,8 @@ class VideoDao {
     private fun cursorToVideo(cursor: Cursor): Video {
         val releaseTimestampIndex = cursor.getColumnIndex("release_timestamp")
         val releaseTimestamp = if (releaseTimestampIndex >= 0) cursor.getLong(releaseTimestampIndex) else 0L
+        val downloadFilePathIndex = cursor.getColumnIndex("download_file_path")
+        val downloadFilePath = if (downloadFilePathIndex >= 0) cursor.getString(downloadFilePathIndex) else null
         return Video(
             id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
             title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
@@ -258,6 +266,8 @@ class VideoDao {
             webpageUrl = cursor.getString(cursor.getColumnIndexOrThrow("webpage_url")),
             playbackProgress = cursor.getFloat(cursor.getColumnIndexOrThrow("playback_progress")),
             isDownloaded = cursor.getInt(cursor.getColumnIndexOrThrow("is_downloaded")) == 1,
+            downloadProgress = null,
+            downloadFilePath = downloadFilePath,
             channelId = cursor.getString(cursor.getColumnIndexOrThrow("channel_id")),
             playbackPositionMs = cursor.getLong(cursor.getColumnIndexOrThrow("playback_position_ms")),
             playbackDurationMs = cursor.getLong(cursor.getColumnIndexOrThrow("playback_duration_ms")),
