@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +49,18 @@ fun ChannelItem(
     onFollowClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val avatarModel: Any? = remember(channel.avatarBase64, channel.avatarUrl) {
+        if (channel.avatarBase64.isNotBlank()) {
+            try {
+                android.util.Base64.decode(channel.avatarBase64, android.util.Base64.DEFAULT)
+            } catch (_: Exception) {
+                channel.avatarUrl.ifEmpty { null }
+            }
+        } else {
+            channel.avatarUrl.ifEmpty { null }
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -56,9 +69,9 @@ fun ChannelItem(
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (channel.avatarUrl.isNotBlank()) {
+        if (avatarModel != null) {
             AsyncImage(
-                model = channel.avatarUrl,
+                model = avatarModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier

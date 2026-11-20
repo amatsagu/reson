@@ -538,6 +538,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             json.optCleanString("thumbnail")
                         }
                     }
+                    val parsedChannelId = json.optCleanString("channel_id")
                     val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
 
                     videos.add(
@@ -548,8 +549,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             durationSeconds = duration,
                             durationText = formatDuration(duration),
                             releaseDateText = releaseDateText,
+                            releaseTimestamp = timestamp,
                             thumbnailUrl = thumb,
                             webpageUrl = webpageUrl,
+                            channelId = parsedChannelId,
                         )
                     )
                 } catch (parseEx: Exception) {
@@ -655,6 +658,66 @@ class YtDlpManager private constructor(private val appContext: Context) {
         } catch (e: Throwable) {
             Log.w(TAG, "Channel search encountered error: ${e.message}")
             Result.Success(emptyList()) // Non-fatal, gracefully fall back to video results
+        }
+    }
+
+    /**
+     * Fetches recent videos from a channel using its ID or handle with --flat-playlist and --playlist-end.
+     * Guaranteed to extract up to maxResults videos cleanly.
+     */
+    suspend fun fetchChannelVideos(
+        channelId: String,
+        handle: String = "",
+        channelTitle: String = "",
+        maxResults: Int = 5,
+    ): Result<List<Video>> = withContext(Dispatchers.IO) {
+        val target = when {
+            channelId.startsWith("UC") -> "https://www.youtube.com/channel/$channelId/videos"
+            handle.isNotBlank() && handle.startsWith("@") -> "https://www.youtube.com/$handle/videos"
+            handle.isNotBlank() -> "https://www.youtube.com/@$handle/videos"
+            channelId.isNotBlank() -> "https://www.youtube.com/channel/$channelId/videos"
+            else -> ""
+        }
+
+        if (target.isEmpty() && channelTitle.isBlank()) {
+            return@withContext Result.Success(emptyList())
+        }
+
+        // Try direct playlist URL first; if empty or fails, fall back to channel name search
+        val primaryResult = if (target.isNotEmpty()) {
+            searchContent(target, maxResults = maxResults)
+        } else {
+            searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults)
+        }
+
+        when (primaryResult) {
+            is Result.Success -> {
+                val videos = primaryResult.data.map { v ->
+                    v.copy(
+                        channelId = channelId.ifEmpty { v.channelId },
+                        channelTitle = channelTitle.ifEmpty { v.channelTitle }
+                    )
+                }
+                if (videos.isNotEmpty()) {
+                    Result.Success(videos)
+                } else if (channelTitle.isNotBlank() && target.isNotEmpty()) {
+                    // Fallback to name search if direct channel URL returned 0 videos
+                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults)
+                    if (fallback is Result.Success) {
+                        Result.Success(fallback.data.map { it.copy(channelId = channelId) })
+                    } else fallback
+                } else {
+                    Result.Success(emptyList())
+                }
+            }
+            is Result.Failure -> {
+                if (channelTitle.isNotBlank() && target.isNotEmpty()) {
+                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults)
+                    if (fallback is Result.Success) {
+                        Result.Success(fallback.data.map { it.copy(channelId = channelId) })
+                    } else primaryResult
+                } else primaryResult
+            }
         }
     }
 

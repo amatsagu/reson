@@ -73,8 +73,34 @@ class VideoDao {
 
     fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 50): List<Video> {
         val videos = mutableListOf<Video>()
-        val query = "SELECT * FROM videos WHERE channel_id = ? ORDER BY release_timestamp DESC LIMIT ?"
+        val query = "SELECT * FROM videos WHERE channel_id = ? ORDER BY release_timestamp DESC, created_at DESC LIMIT ?"
         db.rawQuery(query, arrayOf(channelId, limit.toString())).use { cursor ->
+            while (cursor.moveToNext()) {
+                videos.add(cursorToVideo(cursor))
+            }
+        }
+        return videos
+    }
+
+    /**
+     * Fetches recent videos from subscribed channels, limited to maxPerChannel to prevent overwhelming the UI.
+     */
+    fun getRecentVideosFromFollowedChannels(db: SQLiteDatabase, maxPerChannel: Int = 5): List<Video> {
+        val videos = mutableListOf<Video>()
+        val query = """
+            SELECT v.* FROM (
+                SELECT v.*, ROW_NUMBER() OVER (
+                    PARTITION BY v.channel_id 
+                    ORDER BY v.release_timestamp DESC, v.created_at DESC
+                ) AS rn
+                FROM videos v
+                INNER JOIN channels c ON v.channel_id = c.id
+                WHERE c.is_followed = 1
+            ) v
+            WHERE v.rn <= ?
+            ORDER BY v.release_timestamp DESC, v.created_at DESC
+        """.trimIndent()
+        db.rawQuery(query, arrayOf(maxPerChannel.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 videos.add(cursorToVideo(cursor))
             }
@@ -140,6 +166,7 @@ class VideoDao {
             put("duration_seconds", video.durationSeconds)
             put("duration_text", video.durationText)
             put("release_date_text", video.releaseDateText)
+            put("release_timestamp", if (video.releaseTimestamp > 0) video.releaseTimestamp else 0L)
             put("thumbnail_url", video.thumbnailUrl)
             put("webpage_url", video.webpageUrl)
             put("playback_progress", video.playbackProgress)
@@ -152,6 +179,8 @@ class VideoDao {
     }
 
     private fun cursorToVideo(cursor: Cursor): Video {
+        val releaseTimestampIndex = cursor.getColumnIndex("release_timestamp")
+        val releaseTimestamp = if (releaseTimestampIndex >= 0) cursor.getLong(releaseTimestampIndex) else 0L
         return Video(
             id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
             title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
@@ -159,6 +188,7 @@ class VideoDao {
             durationText = cursor.getString(cursor.getColumnIndexOrThrow("duration_text")),
             durationSeconds = cursor.getInt(cursor.getColumnIndexOrThrow("duration_seconds")),
             releaseDateText = cursor.getString(cursor.getColumnIndexOrThrow("release_date_text")),
+            releaseTimestamp = releaseTimestamp,
             thumbnailUrl = cursor.getString(cursor.getColumnIndexOrThrow("thumbnail_url")),
             webpageUrl = cursor.getString(cursor.getColumnIndexOrThrow("webpage_url")),
             playbackProgress = cursor.getFloat(cursor.getColumnIndexOrThrow("playback_progress")),

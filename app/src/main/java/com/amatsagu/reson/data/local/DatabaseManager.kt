@@ -105,6 +105,22 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
+     * Updates stored base64 image data for an offline cached channel avatar.
+     */
+    suspend fun updateChannelAvatarBase64(channelId: String, avatarBase64: String): Boolean = withContext(Dispatchers.IO) {
+        val success = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            val updated = channelDao.updateAvatarBase64(db, channelId, avatarBase64)
+            Log.d(TAG, "Updated avatar base64 for channel $channelId: $updated (${avatarBase64.length} chars)")
+            updated
+        }
+        if (success) {
+            notifyChannelChanged()
+        }
+        success
+    }
+
+    /**
      * Reactive Flow observing followed channels. Re-emits automatically on mutation.
      */
     fun observeFollowedChannels(): Flow<List<Channel>> = flow {
@@ -182,6 +198,32 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val db = dbHelper.readableDatabase
         videoDao.getVideosForChannel(db, channelId, limit)
     }
+
+    /**
+     * Reactive Flow of videos for a specific channel.
+     */
+    fun observeVideosForChannel(channelId: String, limit: Int = 50): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getVideosForChannel(channelId, limit))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Gets recent uploads from followed channels, limited to maxPerChannel to avoid laggy long lists.
+     */
+    suspend fun getRecentVideosFromFollowed(maxPerChannel: Int = 5): List<Video> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel)
+    }
+
+    /**
+     * Reactive Flow observing recent uploads from followed channels (maxPerChannel).
+     */
+    fun observeRecentVideosFromFollowed(maxPerChannel: Int = 5): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getRecentVideosFromFollowed(maxPerChannel))
+        }
+    }.flowOn(Dispatchers.IO)
 
     /* -------------------------------------------------------------------------
      * Playback & Continue Listening API

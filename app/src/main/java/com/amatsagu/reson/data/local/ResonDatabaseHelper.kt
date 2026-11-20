@@ -32,6 +32,7 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 title TEXT NOT NULL,
                 handle TEXT NOT NULL DEFAULT '',
                 avatar_url TEXT NOT NULL DEFAULT '',
+                avatar_base64 TEXT NOT NULL DEFAULT '',
                 subscriber_count INTEGER NOT NULL DEFAULT 0,
                 subscriber_count_text TEXT NOT NULL DEFAULT '',
                 is_followed INTEGER NOT NULL DEFAULT 1,
@@ -90,12 +91,14 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         Log.i(TAG, "Upgrading database from $oldVersion to $newVersion...")
-        // Handle incremental schema migrations here in future versions
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE channels ADD COLUMN avatar_base64 TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     companion object {
         private const val TAG = "Reson:DB"
         const val DATABASE_NAME = "reson.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
     }
 }

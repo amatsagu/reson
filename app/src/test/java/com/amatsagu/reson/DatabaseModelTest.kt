@@ -33,12 +33,14 @@ class DatabaseModelTest {
             title = "Video Title",
             channelTitle = "Channel Name",
             durationText = "15m",
+            releaseTimestamp = 1710000000L,
             channelId = "UC123",
             playbackPositionMs = 300_000L,
             playbackDurationMs = 900_000L,
             lastPlayedAt = 1700000000L,
         )
         assertEquals("UC123", video.channelId)
+        assertEquals(1710000000L, video.releaseTimestamp)
         assertEquals(300_000L, video.playbackPositionMs)
         assertEquals(900_000L, video.playbackDurationMs)
         assertEquals(1700000000L, video.lastPlayedAt)
@@ -51,10 +53,15 @@ class DatabaseModelTest {
             id = "ch_1",
             title = "Test Channel",
             handle = "@TestChannel",
+            avatarUrl = "https://example.com/avatar.jpg",
+            avatarBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
             isFollowed = true,
             followedAt = 1700000000L,
         )
         assertEquals("ch_1", channel.id)
+        assertEquals("@TestChannel", channel.handle)
+        assertEquals("https://example.com/avatar.jpg", channel.avatarUrl)
+        assertTrue(channel.avatarBase64.isNotEmpty())
         assertTrue(channel.isFollowed)
         assertEquals(1700000000L, channel.followedAt)
     }

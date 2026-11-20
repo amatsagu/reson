@@ -19,9 +19,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,7 +47,9 @@ import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.ResonTab
 import com.amatsagu.reson.model.Video
 import com.amatsagu.reson.ui.components.AdaptiveSectionHeader
+import com.amatsagu.reson.ui.components.AllChannelsCard
 import com.amatsagu.reson.ui.components.AppLoadingOverlay
+import com.amatsagu.reson.ui.components.ChannelAvatarCard
 import com.amatsagu.reson.ui.components.ChannelItem
 import com.amatsagu.reson.ui.components.ContinueSection
 import com.amatsagu.reson.ui.components.MiniPlayerBar
@@ -114,7 +118,14 @@ fun ResonApp(viewModel: MainViewModel) {
                 ResonTab.Channels -> {
                     ChannelsScreen(
                         followedChannels = uiState.followedChannelList,
+                        selectedChannelId = uiState.selectedChannelId,
+                        videos = uiState.channelVideos,
+                        isSyncing = uiState.isSyncingChannels,
+                        onSelectChannel = { viewModel.selectChannelFilter(it) },
                         onFollowClick = { viewModel.toggleFollowChannel(it) },
+                        onPlayVideo = { viewModel.playVideo(it) },
+                        onDownloadVideo = { viewModel.downloadVideo(it) },
+                        onSearchClick = { viewModel.openSearch() },
                         contentPadding = innerPadding
                     )
                 }
@@ -298,45 +309,172 @@ fun EmptyFeedState(
 @Composable
 fun ChannelsScreen(
     followedChannels: List<Channel>,
+    selectedChannelId: String?,
+    videos: List<Video>,
+    isSyncing: Boolean,
+    onSelectChannel: (String?) -> Unit,
     onFollowClick: (Channel) -> Unit,
-    contentPadding: PaddingValues
+    onPlayVideo: (Video) -> Unit,
+    onDownloadVideo: (Video) -> Unit,
+    onSearchClick: () -> Unit,
+    contentPadding: PaddingValues,
 ) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(contentPadding),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        item(key = "channels_title", contentType = "header") {
-            Text(
-                text = stringResource(R.string.channels_title),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-
-        if (followedChannels.isEmpty()) {
-            item(key = "channels_empty", contentType = "empty_state") {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = stringResource(R.string.channels_empty_description),
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 20.sp
+    if (followedChannels.isEmpty()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding)
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .clickable(onClick = onSearchClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Subscriptions,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(42.dp)
                 )
             }
-        } else {
-            items(
-                items = followedChannels,
-                key = { it.id },
-                contentType = { "channel" }
-            ) { channel ->
-                ChannelItem(
-                    channel = channel,
-                    onFollowClick = { onFollowClick(channel) }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = stringResource(R.string.channels_empty_title),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = stringResource(R.string.channels_empty_description),
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp,
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+            contentPadding = PaddingValues(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Screen Header
+            item(key = "channels_screen_header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(R.string.channels_title),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    if (isSyncing) {
+                        Text(
+                            text = stringResource(R.string.channels_syncing),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            // Top Horizontal Swipeable Channels Carousel
+            item(key = "channels_carousel") {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item(key = "all_channels") {
+                        AllChannelsCard(
+                            isSelected = selectedChannelId == null,
+                            onClick = { onSelectChannel(null) }
+                        )
+                    }
+
+                    items(
+                        items = followedChannels,
+                        key = { it.id }
+                    ) { channel ->
+                        ChannelAvatarCard(
+                            channel = channel,
+                            isSelected = selectedChannelId == channel.id,
+                            onClick = {
+                                onSelectChannel(if (selectedChannelId == channel.id) null else channel.id)
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Section Header for Videos
+            item(key = "recent_videos_header") {
+                val selectedChannel = followedChannels.find { it.id == selectedChannelId }
+                val headerTitle = if (selectedChannel != null) {
+                    selectedChannel.title
+                } else {
+                    stringResource(R.string.channels_recent_uploads)
+                }
+
+                AdaptiveSectionHeader(
+                    fullTitle = headerTitle,
+                    shortTitle = headerTitle,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+            }
+
+            // Recent Uploads List (max 5 per channel when in "All" view)
+            if (videos.isEmpty()) {
+                item(key = "no_videos_placeholder") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isSyncing) stringResource(R.string.channels_syncing) else stringResource(R.string.channels_no_videos),
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                items(
+                    items = videos,
+                    key = { it.id },
+                    contentType = { "channel_video" }
+                ) { video ->
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        VideoItem(
+                            video = video,
+                            onPlayClick = { onPlayVideo(video) },
+                            onDownloadClick = { onDownloadVideo(video) }
+                        )
+                    }
+                }
             }
         }
     }

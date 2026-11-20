@@ -21,6 +21,7 @@ class ChannelDao {
             put("title", channel.title)
             put("handle", channel.handle)
             put("avatar_url", channel.avatarUrl)
+            put("avatar_base64", channel.avatarBase64)
             put("subscriber_count", channel.subscriberCount)
             put("subscriber_count_text", channel.subscriberCountText)
             put("is_followed", if (isFollowed) 1 else 0)
@@ -29,6 +30,13 @@ class ChannelDao {
             }
         }
         db.insertWithOnConflict("channels", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    fun updateAvatarBase64(db: SQLiteDatabase, channelId: String, avatarBase64: String): Boolean {
+        val values = ContentValues().apply {
+            put("avatar_base64", avatarBase64)
+        }
+        return db.update("channels", values, "id = ?", arrayOf(channelId)) > 0
     }
 
     fun setFollowStatus(
@@ -100,6 +108,8 @@ class ChannelDao {
         val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
         val handle = cursor.getString(cursor.getColumnIndexOrThrow("handle"))
         val avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow("avatar_url"))
+        val avatarBase64Index = cursor.getColumnIndex("avatar_base64")
+        val avatarBase64 = if (avatarBase64Index >= 0) cursor.getString(avatarBase64Index) ?: "" else ""
         val subs = cursor.getLong(cursor.getColumnIndexOrThrow("subscriber_count"))
         val subsText = cursor.getString(cursor.getColumnIndexOrThrow("subscriber_count_text"))
         val isFollowed = cursor.getInt(cursor.getColumnIndexOrThrow("is_followed")) == 1
@@ -109,6 +119,7 @@ class ChannelDao {
             title = title,
             handle = handle,
             avatarUrl = avatarUrl,
+            avatarBase64 = avatarBase64,
             subscriberCount = subs,
             subscriberCountText = subsText,
             isFollowed = isFollowed,
