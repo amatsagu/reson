@@ -33,8 +33,19 @@ import java.net.URLEncoder
 import java.util.Locale
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlin.math.log10
 import kotlin.random.Random
+
+/**
+ * Coroutine context element to detect if execution is already within queueWorkerJob,
+ * avoiding re-entrancy deadlocks on nested executeQueued calls.
+ */
+private object QueueWorkerElement : CoroutineContext.Element {
+    override val key: CoroutineContext.Key<QueueWorkerElement> = Key
+    object Key : CoroutineContext.Key<QueueWorkerElement>
+}
 
 /**
  * Priority levels for yt-dlp execution to ensure smooth UI responsiveness
@@ -93,6 +104,15 @@ sealed class Result<out T> {
 }
 
 /**
+ * Observable rate-limit and blocking status for YouTube operations.
+ */
+sealed interface RateLimitStatus {
+    data object Normal : RateLimitStatus
+    data class Throttled(val backoffSeconds: Long) : RateLimitStatus
+    data class Blocked(val message: String, val backoffSeconds: Long) : RateLimitStatus
+}
+
+/**
  * Singleton manager for yt-dlp operations on Android.
  * Features smart serialized priority queuing, rate-limit avoidance with exponential backoff,
  * multi-client playback fallback (Android -> iOS -> TV), and network handoff awareness.
@@ -101,6 +121,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     private val _state = MutableStateFlow<YtDlpState>(YtDlpState.Uninitialized)
     val state: StateFlow<YtDlpState> = _state.asStateFlow()
+
+    private val _rateLimitStatus = MutableStateFlow<RateLimitStatus>(RateLimitStatus.Normal)
+    val rateLimitStatus: StateFlow<RateLimitStatus> = _rateLimitStatus.asStateFlow()
 
     private val mutex = Mutex()
     private val queueScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -123,6 +146,22 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     init {
         startQueueWorker()
+        queueScope.launch {
+            networkMonitor.transitions.collect { transition ->
+                when (transition) {
+                    is com.amatsagu.reson.core.network.NetworkTransition.Switched,
+                    is com.amatsagu.reson.core.network.NetworkTransition.Restored -> {
+                        // Reset rate limits and cooldowns on IP / network route change
+                        Log.i(TAG, "Network transition observed. Resetting rate limit cooldowns.")
+                        consecutiveRateLimits = 0
+                        rateLimitCooldownUntilEpochMs = 0L
+                        _rateLimitStatus.value = RateLimitStatus.Normal
+                        wakeSignal.trySend(Unit)
+                    }
+                    is com.amatsagu.reson.core.network.NetworkTransition.Lost -> {}
+                }
+            }
+        }
     }
 
     companion object {
@@ -389,6 +428,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     continue
                 }
 
+                if (now >= rateLimitCooldownUntilEpochMs && _rateLimitStatus.value is RateLimitStatus.Throttled) {
+                    _rateLimitStatus.value = RateLimitStatus.Normal
+                }
+
                 // Enforce polite request spacing to avoid triggering YouTube's bot detection
                 val minSpacing = when (task.priority) {
                     TaskPriority.IMMEDIATE -> 100L
@@ -401,10 +444,13 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
 
                 try {
-                    task.run()
+                    withContext(QueueWorkerElement) {
+                        task.run()
+                    }
                     lastRequestFinishEpochMs = System.currentTimeMillis()
                     if (consecutiveRateLimits > 0) {
                         consecutiveRateLimits = 0
+                        _rateLimitStatus.value = RateLimitStatus.Normal
                     }
                 } catch (e: Throwable) {
                     lastRequestFinishEpochMs = System.currentTimeMillis()
@@ -412,7 +458,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         consecutiveRateLimits++
                         val backoff = (15_000L * (1 shl consecutiveRateLimits.coerceAtMost(3))) + Random.nextLong(1000, 3000)
                         rateLimitCooldownUntilEpochMs = System.currentTimeMillis() + backoff
-                        Log.e(TAG, "YouTube rate limit or bot challenge detected on '${task.tag}'! Circuit breaker active for ${backoff / 1000}s", e)
+                        val backoffSec = backoff / 1000L
+                        if (consecutiveRateLimits >= 2) {
+                            val msg = "YouTube is persistently blocking requests (HTTP 429 / Captcha). Please wait or try switching networks/VPN."
+                            Log.e(TAG, "Persistent YouTube block: $msg Circuit breaker active for ${backoffSec}s", e)
+                            _rateLimitStatus.value = RateLimitStatus.Blocked(message = msg, backoffSeconds = backoffSec)
+                        } else {
+                            Log.w(TAG, "YouTube rate limit detected on '${task.tag}'. Cooldown active for ${backoffSec}s", e)
+                            _rateLimitStatus.value = RateLimitStatus.Throttled(backoffSeconds = backoffSec)
+                        }
                     }
                 }
             }
@@ -420,13 +474,27 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
+     * Manually resets rate-limit circuit breaker and returns status to Normal.
+     */
+    fun resetRateLimitStatus() {
+        consecutiveRateLimits = 0
+        rateLimitCooldownUntilEpochMs = 0L
+        _rateLimitStatus.value = RateLimitStatus.Normal
+        wakeSignal.trySend(Unit)
+    }
+
+    /**
      * Enqueues an operation into the smart rate-limited priority queue.
+     * Prevents re-entrancy deadlock by executing directly inline if already within queue worker.
      */
     suspend fun <T> executeQueued(
         priority: TaskPriority,
         tag: String,
         block: suspend () -> T
     ): T {
+        if (coroutineContext[QueueWorkerElement.Key] != null) {
+            return block()
+        }
         val deferred = CompletableDeferred<T>()
         val task = QueuedTask(
             id = taskCounter.incrementAndGet(),
@@ -640,42 +708,53 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 val clientOptions = listOf(
                     "youtube:player_client=android,web",
                     "youtube:player_client=ios,web",
-                    "youtube:player_client=tv_embedded"
+                    "youtube:player_client=tv_embedded",
+                    ""
+                )
+
+                val formatOptions = listOf(
+                    "ba[ext=m4a]/ba/b",
+                    "bestaudio/best",
+                    "best"
                 )
 
                 var lastException: Throwable? = null
-                for (clientArg in clientOptions) {
-                    try {
-                        val request = YoutubeDLRequest(videoUrl).apply {
-                            addOption("-f", "140/ba[ext=m4a]/ba/b")
-                            addOption("-g")
-                            addOption("--no-playlist")
-                            addOption("--skip-download")
-                            addOption("--no-warnings")
-                            addOption("--extractor-args", clientArg)
-                        }
-                        val response = YoutubeDL.getInstance().execute(request)
-                        val streamUrl = response.out.trim().lines().firstOrNull { it.startsWith("http") }
-                        if (!streamUrl.isNullOrBlank()) {
-                            var expiryMs = System.currentTimeMillis() + (4 * 3600 * 1000L)
-                            val expireMatch = Regex("[?&]expire=(\\d+)").find(streamUrl)
-                            if (expireMatch != null) {
-                                val expireSec = expireMatch.groupValues[1].toLongOrNull()
-                                if (expireSec != null && expireSec > 0) {
-                                    expiryMs = expireSec * 1000L
+                outerLoop@ for (format in formatOptions) {
+                    for (clientArg in clientOptions) {
+                        try {
+                            val request = YoutubeDLRequest(videoUrl).apply {
+                                addOption("-f", format)
+                                addOption("-g")
+                                addOption("--no-playlist")
+                                addOption("--skip-download")
+                                addOption("--no-warnings")
+                                if (clientArg.isNotBlank()) {
+                                    addOption("--extractor-args", clientArg)
                                 }
                             }
-                            streamCacheMutex.withLock {
-                                streamUrlCache[videoId] = Pair(streamUrl, expiryMs)
+                            val response = YoutubeDL.getInstance().execute(request)
+                            val streamUrl = response.out.trim().lines().firstOrNull { it.startsWith("http") }
+                            if (!streamUrl.isNullOrBlank()) {
+                                var expiryMs = System.currentTimeMillis() + (4 * 3600 * 1000L)
+                                val expireMatch = Regex("[?&]expire=(\\d+)").find(streamUrl)
+                                if (expireMatch != null) {
+                                    val expireSec = expireMatch.groupValues[1].toLongOrNull()
+                                    if (expireSec != null && expireSec > 0) {
+                                        expiryMs = expireSec * 1000L
+                                    }
+                                }
+                                streamCacheMutex.withLock {
+                                    streamUrlCache[videoId] = Pair(streamUrl, expiryMs)
+                                }
+                                Log.d(TAG, "Extracted fresh stream URL for $videoId via client '$clientArg' format '$format' (expires in ${(expiryMs - System.currentTimeMillis()) / 60000} mins)")
+                                return@executeQueued Result.Success(streamUrl)
                             }
-                            Log.d(TAG, "Extracted fresh stream URL for $videoId via client '$clientArg' (expires in ${(expiryMs - System.currentTimeMillis()) / 60000} mins)")
-                            return@executeQueued Result.Success(streamUrl)
-                        }
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "Stream extraction with client '$clientArg' failed: ${e.message}")
-                        lastException = e
-                        if (!isRateLimitError(e)) {
-                            break
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "Stream extraction with client '$clientArg' (format '$format') failed: ${e.message}")
+                            lastException = e
+                            if (isRateLimitError(e)) {
+                                break@outerLoop
+                            }
                         }
                     }
                 }
@@ -688,7 +767,14 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     }
                 }
 
-                Result.Failure(lastException ?: IllegalStateException("No stream URL returned"), "Failed to extract audio stream URL")
+                val isBlocked = consecutiveRateLimits >= 2 || (lastException != null && isRateLimitError(lastException))
+                val failureMsg = if (isBlocked) {
+                    "YouTube is blocking requests (HTTP 429 / Captcha). Waiting before retry."
+                } else {
+                    "Failed to extract audio stream URL"
+                }
+
+                Result.Failure(lastException ?: IllegalStateException("No stream URL returned"), failureMsg)
             } catch (e: Throwable) {
                 Result.Failure(e, e.message ?: "Unexpected error extracting stream URL")
             }

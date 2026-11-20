@@ -37,6 +37,7 @@ data class PlaybackState(
     val currentVideo: Video? = null,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
+    val isSlowConnection: Boolean = false,
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
     val progress: Float = 0f,
@@ -141,6 +142,7 @@ class AudioPlayerManager(
             when (playbackState) {
                 Player.STATE_BUFFERING -> {
                     _playbackState.update { it.copy(isBuffering = true) }
+                    startProgressTicker()
                 }
                 Player.STATE_READY -> {
                     recoveryAttempts = 0
@@ -152,6 +154,7 @@ class AudioPlayerManager(
                     _playbackState.update {
                         it.copy(
                             isBuffering = false,
+                            isSlowConnection = false,
                             durationMs = duration,
                             currentPositionMs = position,
                             progress = progress,
@@ -350,6 +353,7 @@ class AudioPlayerManager(
                 exoPlayer.setMediaItem(mediaItem, safePosition)
                 exoPlayer.prepare()
                 exoPlayer.play()
+                startProgressTicker()
                 Log.d(TAG, "Streaming initialized for '${video.title}' starting at $safePosition ms")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start playback for ${video.id}", e)
@@ -380,6 +384,7 @@ class AudioPlayerManager(
                 exoPlayer.setMediaItem(mediaItem, positionMs.coerceAtLeast(0L))
                 exoPlayer.prepare()
                 exoPlayer.play()
+                startProgressTicker()
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to resume with fresh stream URL", e)
                 _playbackState.update {
@@ -493,8 +498,22 @@ class AudioPlayerManager(
                 // Check buffering stall watchdog
                 if (exoPlayer.playbackState == Player.STATE_BUFFERING) {
                     continuousBufferingMs += 400L
-                    if (continuousBufferingMs >= 12_000L && !isRecovering) {
-                        continuousBufferingMs = 0L
+
+                    // If buffering stalls past 20s, surface reassuring hint without stopping background recovery
+                    if (continuousBufferingMs >= 20_000L) {
+                        _playbackState.update {
+                            it.copy(
+                                isSlowConnection = true,
+                                errorMessage = if (!networkMonitor.isOnline()) {
+                                    "Waiting for internet connection..."
+                                } else {
+                                    "Slow connection. Still loading audio..."
+                                }
+                            )
+                        }
+                    }
+
+                    if (continuousBufferingMs in 12_000L..12_400L && !isRecovering) {
                         val video = _playbackState.value.currentVideo
                         if (video != null && onStreamRecoveryRequested != null && recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
                             Log.w(TAG, "Buffering watchdog triggered after 12s stall. Attempting stream recovery...")
@@ -504,7 +523,14 @@ class AudioPlayerManager(
                         }
                     }
                 } else {
-                    continuousBufferingMs = 0L
+                    if (continuousBufferingMs > 0L) {
+                        continuousBufferingMs = 0L
+                        if (_playbackState.value.isSlowConnection) {
+                            _playbackState.update {
+                                it.copy(isSlowConnection = false, errorMessage = null)
+                            }
+                        }
+                    }
                 }
 
                 // Periodically persist progress to database every 3 seconds

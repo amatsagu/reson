@@ -75,9 +75,25 @@ data class MainUiState(
     val playbackDurationMs: Long = 0L,
     val playbackProgress: Float = 0f,
 
+    // Network & Rate-Limit Diagnostics Hints
+    val isOffline: Boolean = false,
+    val isRateLimitBlocked: Boolean = false,
+    val rateLimitBlockedMessage: String? = null,
+    val networkHintMessage: String? = null,
+    val playbackErrorMessage: String? = null,
+    val isNetworkBannerDismissed: Boolean = false,
+
     // Diagnostics
     val diagnosticLogs: List<String> = emptyList(),
-)
+) {
+    /**
+     * Reassuring inline player status hint for users during stalls, slow connections, or blocks.
+     */
+    val playerStatusHint: String?
+        get() = playbackErrorMessage
+            ?: networkHintMessage
+            ?: if (isOffline) "No connection • Offline" else null
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -90,6 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private var suggestJob: Job? = null
+    private var playWatchdogJob: Job? = null
 
     private val audioPlayerManager: AudioPlayerManager = AudioPlayerManager(
         context = application,
@@ -118,18 +135,65 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         addLog("App started. Initializing...")
 
+        // Observe continuous network connectivity state (offline vs online)
+        viewModelScope.launch {
+            com.amatsagu.reson.core.network.NetworkMonitor.getInstance(application).networkState.collect { netState ->
+                val offline = !netState.isConnected || !netState.isValidated
+                _uiState.update { it.copy(isOffline = offline) }
+            }
+        }
+
+        // Observe YouTube rate-limit & persistent blocking state
+        viewModelScope.launch {
+            ytDlpManager.rateLimitStatus.collect { status ->
+                when (status) {
+                    is RateLimitStatus.Blocked -> {
+                        addLog("YouTube persistent block detected: ${status.message}")
+                        _uiState.update {
+                            it.copy(
+                                isRateLimitBlocked = true,
+                                rateLimitBlockedMessage = status.message,
+                                isNetworkBannerDismissed = false
+                            )
+                        }
+                    }
+                    is RateLimitStatus.Throttled -> {
+                        addLog("YouTube gentle cooldown active (${status.backoffSeconds}s)")
+                        _uiState.update {
+                            it.copy(
+                                isRateLimitBlocked = false,
+                                rateLimitBlockedMessage = null
+                            )
+                        }
+                    }
+                    is RateLimitStatus.Normal -> {
+                        _uiState.update {
+                            it.copy(
+                                isRateLimitBlocked = false,
+                                rateLimitBlockedMessage = null,
+                                isNetworkBannerDismissed = false
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // Observe network connectivity transitions for smart logging and diagnostics
         viewModelScope.launch {
             com.amatsagu.reson.core.network.NetworkMonitor.getInstance(application).transitions.collect { transition ->
                 when (transition) {
                     is com.amatsagu.reson.core.network.NetworkTransition.Lost -> {
                         addLog("Network connection lost (${transition.lastState.displayName})")
+                        _uiState.update { it.copy(isNetworkBannerDismissed = false) }
                     }
                     is com.amatsagu.reson.core.network.NetworkTransition.Switched -> {
                         addLog("Network switched: ${transition.from.displayName} -> ${transition.to.displayName}")
+                        _uiState.update { it.copy(isNetworkBannerDismissed = false) }
                     }
                     is com.amatsagu.reson.core.network.NetworkTransition.Restored -> {
                         addLog("Network restored: ${transition.to.displayName}")
+                        _uiState.update { it.copy(isNetworkBannerDismissed = false) }
                     }
                 }
             }
@@ -204,8 +268,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isAudioBuffering = playback.isBuffering,
                         playbackPositionMs = playback.currentPositionMs,
                         playbackDurationMs = playback.durationMs,
-                        playbackProgress = playback.progress
+                        playbackProgress = playback.progress,
+                        playbackErrorMessage = playback.errorMessage
                     )
+                }
+                if (playback.isPlaying) {
+                    playWatchdogJob?.cancel()
+                    _uiState.update { it.copy(networkHintMessage = null) }
                 }
             }
         }
@@ -667,6 +736,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         addLog("Playing video: ${video.title}")
         val effectiveDuration = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
 
+        playWatchdogJob?.cancel()
+        val isOffline = !com.amatsagu.reson.core.network.NetworkMonitor.getInstance(getApplication()).isOnline()
+        val initialHint = if (isOffline) "No internet connection. Waiting for network…" else null
+
         _uiState.update {
             it.copy(
                 currentPlayingVideo = video,
@@ -674,8 +747,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isAudioBuffering = true,
                 playbackPositionMs = video.playbackPositionMs,
                 playbackDurationMs = effectiveDuration,
-                playbackProgress = video.playbackProgress
+                playbackProgress = video.playbackProgress,
+                networkHintMessage = initialHint,
+                playbackErrorMessage = null
             )
+        }
+
+        // 20-second watchdog: if stream extraction or audio startup takes >20s, reassure user
+        playWatchdogJob = viewModelScope.launch {
+            delay(20_000L)
+            if (_uiState.value.isAudioBuffering && _uiState.value.currentPlayingVideo?.id == video.id && !_uiState.value.isPlaying) {
+                _uiState.update { current ->
+                    if (current.currentPlayingVideo?.id == video.id && current.isAudioBuffering && !current.isPlaying) {
+                        current.copy(
+                            networkHintMessage = if (current.isOffline) {
+                                "No internet connection. Waiting for network…"
+                            } else if (current.isRateLimitBlocked) {
+                                "YouTube is blocking requests (429). Retrying…"
+                            } else {
+                                "Slow connection. Still loading audio…"
+                            }
+                        )
+                    } else current
+                }
+            }
         }
 
         viewModelScope.launch {
@@ -697,10 +792,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is Result.Failure -> {
                     addLog("Audio stream extraction failed: ${streamResult.message}")
+                    playWatchdogJob?.cancel()
                     _uiState.update {
                         it.copy(
                             isAudioBuffering = false,
-                            isPlaying = false
+                            isPlaying = false,
+                            playbackErrorMessage = streamResult.message
                         )
                     }
                 }
@@ -724,6 +821,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closePlayer() {
+        playWatchdogJob?.cancel()
         audioPlayerManager.stop()
         _uiState.update {
             it.copy(
@@ -731,9 +829,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isPlaying = false,
                 isAudioBuffering = false,
                 playbackPositionMs = 0L,
-                playbackProgress = 0f
+                playbackProgress = 0f,
+                networkHintMessage = null,
+                playbackErrorMessage = null
             )
         }
+    }
+
+    fun dismissNetworkBanner() {
+        _uiState.update { it.copy(isNetworkBannerDismissed = true) }
     }
 
     override fun onCleared() {

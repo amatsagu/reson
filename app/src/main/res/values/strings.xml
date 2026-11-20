@@ -71,4 +71,12 @@
     <!-- General Placeholders -->
     <string name="placeholder_untitled">Untitled</string>
     <string name="placeholder_unknown_channel">Unknown Channel</string>
+
+    <!-- Network & Rate-Limit Diagnostics -->
+    <string name="network_offline_banner">No internet connection. Waiting for network…</string>
+    <string name="network_youtube_blocked_banner">YouTube is blocking requests (HTTP 429 / Captcha). Waiting to retry…</string>
+    <string name="network_slow_connection_hint">Slow connection. Still loading audio…</string>
+    <string name="network_waiting_for_connection">Waiting for internet connection…</string>
+    <string name="network_reconnecting">Reconnecting stream…</string>
+    <string name="action_dismiss">Dismiss</string>
 </resources>

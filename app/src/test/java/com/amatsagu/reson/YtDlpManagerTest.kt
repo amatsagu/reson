@@ -194,4 +194,22 @@ class YtDlpManagerTest {
         assertTrue(TaskPriority.IMMEDIATE.weight > TaskPriority.INTERACTIVE.weight)
         assertTrue(TaskPriority.INTERACTIVE.weight > TaskPriority.BACKGROUND.weight)
     }
+
+    @Test
+    fun testRateLimitStatus_sealedHierarchy() {
+        val normal: RateLimitStatus = RateLimitStatus.Normal
+        assertTrue(normal is RateLimitStatus.Normal)
+
+        val throttled: RateLimitStatus = RateLimitStatus.Throttled(backoffSeconds = 30L)
+        assertTrue(throttled is RateLimitStatus.Throttled)
+        assertEquals(30L, (throttled as RateLimitStatus.Throttled).backoffSeconds)
+
+        val blocked: RateLimitStatus = RateLimitStatus.Blocked(
+            message = "YouTube is persistently blocking requests (429)",
+            backoffSeconds = 60L
+        )
+        assertTrue(blocked is RateLimitStatus.Blocked)
+        assertEquals("YouTube is persistently blocking requests (429)", (blocked as RateLimitStatus.Blocked).message)
+        assertEquals(60L, blocked.backoffSeconds)
+    }
 }

@@ -29,6 +29,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Warning
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -166,6 +169,7 @@ fun BottomAudioPlayerContent(
     onSeek: (Long) -> Unit,
     onCloseClick: () -> Unit,
     modifier: Modifier = Modifier,
+    statusHint: String? = null,
 ) {
     val effectiveDurationMs = remember(durationMs, video.durationSeconds) {
         if (durationMs > 0) durationMs else (video.durationSeconds * 1000L).coerceAtLeast(1000L)
@@ -219,7 +223,7 @@ fun BottomAudioPlayerContent(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Title and Channel author (remaining time omitted here to prevent duplicate with progress indicator)
+            // Title and Channel author or diagnostic status hint
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.Center
@@ -233,8 +237,29 @@ fun BottomAudioPlayerContent(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                if (video.channelTitle.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(2.dp))
+                if (!statusHint.isNullOrBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = statusHint,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                } else if (video.channelTitle.isNotBlank()) {
                     Text(
                         text = video.channelTitle,
                         fontSize = 12.sp,
@@ -341,6 +366,12 @@ fun ResonUnifiedBottomBar(
     selectedTab: ResonTab,
     onTabSelected: (ResonTab) -> Unit,
     modifier: Modifier = Modifier,
+    statusHint: String? = null,
+    isOffline: Boolean = false,
+    isRateLimitBlocked: Boolean = false,
+    rateLimitMessage: String? = null,
+    isBannerDismissed: Boolean = false,
+    onDismissBanner: () -> Unit = {},
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -354,6 +385,25 @@ fun ResonUnifiedBottomBar(
                 .fillMaxWidth()
                 .navigationBarsPadding()
         ) {
+            val showBanner = !isBannerDismissed && (isOffline || (isRateLimitBlocked && rateLimitMessage != null))
+            AnimatedVisibility(
+                visible = showBanner,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    NetworkStatusBanner(
+                        isRateLimitBlocked = isRateLimitBlocked,
+                        rateLimitMessage = rateLimitMessage,
+                        onDismiss = onDismissBanner
+                    )
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                        thickness = 0.5.dp
+                    )
+                }
+            }
+
             AnimatedVisibility(
                 visible = currentVideo != null,
                 enter = expandVertically() + fadeIn(),
@@ -369,7 +419,8 @@ fun ResonUnifiedBottomBar(
                             durationMs = durationMs,
                             onPlayPauseClick = onPlayPauseClick,
                             onSeek = onSeek,
-                            onCloseClick = onCloseClick
+                            onCloseClick = onCloseClick,
+                            statusHint = statusHint
                         )
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
@@ -384,6 +435,80 @@ fun ResonUnifiedBottomBar(
                 onTabSelected = onTabSelected,
                 containerColor = Color.Transparent
             )
+        }
+    }
+}
+
+/**
+ * Animated banner alerting the user when the device is completely offline
+ * or when YouTube is persistently blocking requests (HTTP 429 / Captcha),
+ * docked seamlessly on top of the bottom audio player / navigation bar.
+ */
+@Composable
+fun NetworkStatusBanner(
+    isRateLimitBlocked: Boolean,
+    rateLimitMessage: String?,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isError = isRateLimitBlocked
+    val containerColor = if (isError) {
+        MaterialTheme.colorScheme.errorContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val contentColor = if (isError) {
+        MaterialTheme.colorScheme.onErrorContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        color = containerColor,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (isError) Icons.Outlined.Warning else Icons.Outlined.WifiOff,
+                contentDescription = null,
+                tint = contentColor,
+                modifier = Modifier.size(18.dp)
+            )
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Text(
+                text = if (isError) {
+                    rateLimitMessage ?: stringResource(R.string.network_youtube_blocked_banner)
+                } else {
+                    stringResource(R.string.network_offline_banner)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = contentColor,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(26.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = stringResource(R.string.action_dismiss),
+                    tint = contentColor,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

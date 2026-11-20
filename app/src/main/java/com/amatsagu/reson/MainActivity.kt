@@ -6,8 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -107,7 +107,13 @@ fun ResonApp(viewModel: MainViewModel) {
                             viewModel.closeSearch()
                         }
                         viewModel.selectTab(tab)
-                    }
+                    },
+                    statusHint = uiState.playerStatusHint,
+                    isOffline = uiState.isOffline,
+                    isRateLimitBlocked = uiState.isRateLimitBlocked,
+                    rateLimitMessage = uiState.rateLimitBlockedMessage,
+                    isBannerDismissed = uiState.isNetworkBannerDismissed,
+                    onDismissBanner = { viewModel.dismissNetworkBanner() }
                 )
             }
         ) { innerPadding ->
@@ -176,6 +182,7 @@ fun ResonApp(viewModel: MainViewModel) {
                     onFollowChannel = { viewModel.toggleFollowChannel(it) },
                     contentPadding = innerPadding
                 )
+
             }
         }
 
