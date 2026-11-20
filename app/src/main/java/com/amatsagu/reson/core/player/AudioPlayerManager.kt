@@ -14,6 +14,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import com.amatsagu.reson.core.network.NetworkMonitor
+import com.amatsagu.reson.core.network.NetworkTransition
 import com.amatsagu.reson.model.Video
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,14 +56,25 @@ class AudioPlayerManager(
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val networkMonitor = NetworkMonitor.getInstance(context)
     private var tickerJob: Job? = null
     private var lastSavedPositionMs = 0L
     private var recoveryAttempts = 0
     private var isRecovering = false
     private var continuousBufferingMs = 0L
+    private var wasPlayingBeforeNetworkLoss = false
+    private var stallPositionMs = 0L
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
+
+    init {
+        scope.launch {
+            networkMonitor.transitions.collect { transition ->
+                handleNetworkTransition(transition)
+            }
+        }
+    }
 
     private val exoPlayer: ExoPlayer by lazy {
         // Low-latency buffer tuning for audio: start playing after 500ms buffer, recover from rebuffers in 1s
@@ -174,6 +187,24 @@ class AudioPlayerManager(
             Log.e(TAG, "ExoPlayer playback error (code ${error.errorCode}): ${error.message}", error)
             stopProgressTicker()
 
+            // If offline, pause and await network restoration instead of exhausting recovery attempts
+            if (!networkMonitor.isOnline()) {
+                Log.w(TAG, "Playback error occurred while offline. Waiting for network connection...")
+                val video = _playbackState.value.currentVideo
+                if (video != null) {
+                    wasPlayingBeforeNetworkLoss = true
+                    stallPositionMs = exoPlayer.currentPosition.coerceAtLeast(_playbackState.value.currentPositionMs)
+                    _playbackState.update {
+                        it.copy(
+                            isPlaying = false,
+                            isBuffering = true,
+                            errorMessage = "Waiting for internet connection..."
+                        )
+                    }
+                }
+                return
+            }
+
             // Check if automatic self-recovery should be attempted
             val video = _playbackState.value.currentVideo
             if (video != null && recoveryAttempts < MAX_RECOVERY_ATTEMPTS && onStreamRecoveryRequested != null) {
@@ -213,6 +244,76 @@ class AudioPlayerManager(
         }
     }
 
+    private fun handleNetworkTransition(transition: NetworkTransition) {
+        when (transition) {
+            is NetworkTransition.Lost -> {
+                Log.w(TAG, "AudioPlayer observed network LOST (was ${transition.lastState.displayName})")
+                val isCurrentlyActive = exoPlayer.isPlaying || _playbackState.value.isPlaying || _playbackState.value.isBuffering
+                if (isCurrentlyActive && _playbackState.value.currentVideo != null) {
+                    wasPlayingBeforeNetworkLoss = true
+                    stallPositionMs = exoPlayer.currentPosition.coerceAtLeast(_playbackState.value.currentPositionMs)
+                    stopProgressTicker()
+                    _playbackState.update {
+                        it.copy(
+                            isPlaying = false,
+                            isBuffering = true,
+                            errorMessage = "Waiting for internet connection..."
+                        )
+                    }
+                }
+            }
+            is NetworkTransition.Switched -> {
+                Log.i(TAG, "AudioPlayer observed network SWITCHED: ${transition.from.displayName} -> ${transition.to.displayName}")
+                triggerSmartNetworkRecovery(transition.to.displayName)
+            }
+            is NetworkTransition.Restored -> {
+                Log.i(TAG, "AudioPlayer observed network RESTORED on ${transition.to.displayName}")
+                triggerSmartNetworkRecovery(transition.to.displayName)
+            }
+        }
+    }
+
+    private fun triggerSmartNetworkRecovery(networkDisplayName: String) {
+        val video = _playbackState.value.currentVideo ?: return
+        val shouldRecover = wasPlayingBeforeNetworkLoss ||
+                exoPlayer.isPlaying ||
+                _playbackState.value.isPlaying ||
+                _playbackState.value.isBuffering ||
+                _playbackState.value.errorMessage != null
+
+        if (shouldRecover && onStreamRecoveryRequested != null) {
+            val resumePos = if (stallPositionMs > 0) stallPositionMs else exoPlayer.currentPosition.coerceAtLeast(_playbackState.value.currentPositionMs)
+            stallPositionMs = 0L
+            wasPlayingBeforeNetworkLoss = false
+            recoveryAttempts = 0
+            isRecovering = true
+            continuousBufferingMs = 0L
+
+            _playbackState.update {
+                it.copy(
+                    isBuffering = true,
+                    errorMessage = "Reconnecting on $networkDisplayName..."
+                )
+            }
+
+            scope.launch {
+                try {
+                    Log.i(TAG, "Executing automatic handoff recovery on $networkDisplayName for '${video.title}' at $resumePos ms")
+                    onStreamRecoveryRequested.invoke(video, resumePos)
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Handoff recovery failed on $networkDisplayName", e)
+                    _playbackState.update {
+                        it.copy(
+                            isPlaying = false,
+                            isBuffering = false,
+                            errorMessage = "Failed to reconnect on $networkDisplayName"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Prepares and streams audio from direct HTTP stream URL with atomic start position.
      */
@@ -222,6 +323,8 @@ class AudioPlayerManager(
                 recoveryAttempts = 0
                 isRecovering = false
                 continuousBufferingMs = 0L
+                wasPlayingBeforeNetworkLoss = false
+                stallPositionMs = 0L
 
                 val safePosition = initialPositionMs.coerceAtLeast(0L)
                 val effectiveDuration = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
@@ -346,6 +449,8 @@ class AudioPlayerManager(
             saveCurrentProgress()
             isRecovering = false
             continuousBufferingMs = 0L
+            wasPlayingBeforeNetworkLoss = false
+            stallPositionMs = 0L
             exoPlayer.stop()
             stopProgressTicker()
             _playbackState.update {

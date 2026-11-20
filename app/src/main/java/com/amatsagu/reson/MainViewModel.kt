@@ -101,9 +101,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onStreamRecoveryRequested = { video, positionMs ->
             addLog("Stream recovery requested for ${video.title} at $positionMs ms")
             ytDlpManager.invalidateStreamCache(video.id)
-            val freshResult = ytDlpManager.getAudioStreamUrl(video.id, forceRefresh = true)
+            val freshResult = ytDlpManager.getAudioStreamUrl(
+                videoId = video.id,
+                forceRefresh = true,
+                priority = TaskPriority.IMMEDIATE
+            )
             if (freshResult is Result.Success) {
                 audioPlayerManager.resumeWithFreshUrl(freshResult.data, positionMs)
+                addLog("Stream recovered successfully on new connection")
             } else {
                 addLog("Stream recovery failed: ${(freshResult as Result.Failure).message}")
             }
@@ -112,6 +117,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         addLog("App started. Initializing...")
+
+        // Observe network connectivity transitions for smart logging and diagnostics
+        viewModelScope.launch {
+            com.amatsagu.reson.core.network.NetworkMonitor.getInstance(application).transitions.collect { transition ->
+                when (transition) {
+                    is com.amatsagu.reson.core.network.NetworkTransition.Lost -> {
+                        addLog("Network connection lost (${transition.lastState.displayName})")
+                    }
+                    is com.amatsagu.reson.core.network.NetworkTransition.Switched -> {
+                        addLog("Network switched: ${transition.from.displayName} -> ${transition.to.displayName}")
+                    }
+                    is com.amatsagu.reson.core.network.NetworkTransition.Restored -> {
+                        addLog("Network restored: ${transition.to.displayName}")
+                    }
+                }
+            }
+        }
 
         // Observe followed channels from SQLite
         viewModelScope.launch {

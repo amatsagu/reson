@@ -177,4 +177,21 @@ class YtDlpManagerTest {
         val resultsForExactHandle = YtDlpManager.filterAndRankChannels("SmugVODs", channels, emptyList())
         assertTrue(resultsForExactHandle.any { it.id == "c3_exact_small" })
     }
+
+    @Test
+    fun testIsRateLimitError() {
+        assertTrue(YtDlpManager.isRateLimitError(RuntimeException("HTTP Error 429: Too Many Requests")))
+        assertTrue(YtDlpManager.isRateLimitError(RuntimeException("Sign in to confirm you're not a bot")))
+        assertTrue(YtDlpManager.isRateLimitError(RuntimeException("Sign in to confirm you are not a bot")))
+        assertTrue(YtDlpManager.isRateLimitError(RuntimeException("YouTube returned a CAPTCHA challenge")))
+        assertTrue(YtDlpManager.isRateLimitError(RuntimeException("Client temporarily blocked due to rate limit")))
+        org.junit.Assert.assertFalse(YtDlpManager.isRateLimitError(RuntimeException("Video unavailable")))
+        org.junit.Assert.assertFalse(YtDlpManager.isRateLimitError(RuntimeException("Unknown format 140")))
+    }
+
+    @Test
+    fun testTaskPriorityWeights() {
+        assertTrue(TaskPriority.IMMEDIATE.weight > TaskPriority.INTERACTIVE.weight)
+        assertTrue(TaskPriority.INTERACTIVE.weight > TaskPriority.BACKGROUND.weight)
+    }
 }

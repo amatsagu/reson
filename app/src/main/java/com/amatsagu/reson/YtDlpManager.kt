@@ -2,6 +2,7 @@ package com.amatsagu.reson
 
 import android.content.Context
 import android.util.Log
+import com.amatsagu.reson.core.network.NetworkMonitor
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import com.yausername.youtubedl_android.YoutubeDL.UpdateStatus
@@ -13,17 +14,64 @@ import com.yausername.ffmpeg.FFmpeg
 import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.SearchResultItem
 import com.amatsagu.reson.model.Video
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel as KChannel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.PriorityBlockingQueue
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.log10
+import kotlin.random.Random
+
+/**
+ * Priority levels for yt-dlp execution to ensure smooth UI responsiveness
+ * while strictly preventing rate limits.
+ */
+enum class TaskPriority(val weight: Int) {
+    IMMEDIATE(3),   // Direct user playback & automatic stream recovery
+    INTERACTIVE(2), // Search queries, autocomplete, UI exploration
+    BACKGROUND(1)   // Channel sync, avatar caching, version updates
+}
+
+/**
+ * Task item stored in the PriorityBlockingQueue.
+ */
+private class QueuedTask<T>(
+    val id: Long,
+    val priority: TaskPriority,
+    val tag: String,
+    val block: suspend () -> T,
+    val deferred: CompletableDeferred<T>
+) : Comparable<QueuedTask<*>> {
+    override fun compareTo(other: QueuedTask<*>): Int {
+        val pComp = other.priority.weight.compareTo(this.priority.weight)
+        if (pComp != 0) return pComp
+        return this.id.compareTo(other.id)
+    }
+
+    suspend fun run() {
+        if (!deferred.isActive) return
+        try {
+            val result = block()
+            deferred.complete(result)
+        } catch (e: Throwable) {
+            deferred.completeExceptionally(e)
+        }
+    }
+}
 
 /**
  * State representing the lifecycle and health of yt-dlp.
@@ -46,8 +94,8 @@ sealed class Result<out T> {
 
 /**
  * Singleton manager for yt-dlp operations on Android.
- * Handles initialization, self-patching (auto-updates), self-recovery on corruption,
- * and command execution.
+ * Features smart serialized priority queuing, rate-limit avoidance with exponential backoff,
+ * multi-client playback fallback (Android -> iOS -> TV), and network handoff awareness.
  */
 class YtDlpManager private constructor(private val appContext: Context) {
 
@@ -55,6 +103,27 @@ class YtDlpManager private constructor(private val appContext: Context) {
     val state: StateFlow<YtDlpState> = _state.asStateFlow()
 
     private val mutex = Mutex()
+    private val queueScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val priorityQueue = PriorityBlockingQueue<QueuedTask<*>>()
+    private val wakeSignal = KChannel<Unit>(KChannel.CONFLATED)
+    private val taskCounter = AtomicLong(0)
+    private val networkMonitor = NetworkMonitor.getInstance(appContext)
+
+    @Volatile
+    private var lastRequestFinishEpochMs: Long = 0L
+
+    @Volatile
+    private var rateLimitCooldownUntilEpochMs: Long = 0L
+
+    @Volatile
+    private var consecutiveRateLimits: Int = 0
+
+    private val streamUrlCache = mutableMapOf<String, Pair<String, Long>>() // videoId -> (streamUrl, expiryEpochMs)
+    private val streamCacheMutex = Mutex()
+
+    init {
+        startQueueWorker()
+    }
 
     companion object {
         private const val TAG = "Reson:YtDlp"
@@ -66,6 +135,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
             return instance ?: synchronized(this) {
                 instance ?: YtDlpManager(context.applicationContext).also { instance = it }
             }
+        }
+
+        fun isRateLimitError(error: Throwable): Boolean {
+            val msg = (error.message ?: "").lowercase()
+            return msg.contains("429") ||
+                    msg.contains("too many requests") ||
+                    msg.contains("confirm you're not a bot") ||
+                    msg.contains("sign in to confirm") ||
+                    msg.contains("rate limit") ||
+                    msg.contains("rate-limit") ||
+                    msg.contains("blocked") ||
+                    msg.contains("captcha")
         }
 
         /**
@@ -156,8 +237,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
         /**
          * Computes similarity between search query and channel name/handle (0.0 to 1.0).
-         * Normalizes alphanumeric text (ignoring spaces, case, and punctuation) to match YouTube's behavior,
-         * so queries like "smug alana" match "SmugAlana", "mr beast" matches "MrBeast", etc.
+         * Normalizes alphanumeric text (ignoring spaces, case, and punctuation) to match YouTube's behavior.
          */
         fun calculateSimilarity(query: String, title: String, handle: String): Double {
             val qNorm = query.lowercase().filter { it.isLetterOrDigit() }
@@ -166,20 +246,16 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
             if (qNorm.isEmpty() || tNorm.isEmpty()) return 0.0
 
-            // 1. Exact alphanumeric match (e.g. "smug alana" == "smugalana" == "SmugAlana")
             if (qNorm == tNorm || (hNorm.isNotEmpty() && qNorm == hNorm)) return 1.0
 
-            // 2. Prefix match on normalized text (e.g. "smug" matches "SmugAlana")
             if (tNorm.startsWith(qNorm) || (hNorm.isNotEmpty() && hNorm.startsWith(qNorm)) || qNorm.startsWith(tNorm)) {
                 return 0.92
             }
 
-            // 3. Substring containment on normalized text (e.g. "alana" matches "SmugAlana")
             if (tNorm.contains(qNorm) || (hNorm.isNotEmpty() && hNorm.contains(qNorm)) || qNorm.contains(tNorm)) {
                 return 0.85
             }
 
-            // 4. Word overlap with camelCase support (e.g. "SmugAlana" -> ["smug", "alana"])
             val titleExpanded = title.replace("(?<=[a-z])(?=[A-Z])".toRegex(), " ")
             val handleExpanded = handle.replace("(?<=[a-z])(?=[A-Z])".toRegex(), " ")
             val qWords = query.lowercase().split("[^a-zA-Z0-9]+".toRegex()).filter { it.isNotEmpty() }.toSet()
@@ -208,7 +284,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
         /**
          * Filters out random channels with low similarity (< 0.45), and sorts matching channels
          * by similarity score, subscriber count, and whether they have active recent videos.
-         * Channels with less than 1,000 subscribers are skipped unless their @handle matches the query perfectly (with or without '@').
          */
         fun filterAndRankChannels(
             query: String,
@@ -216,17 +291,14 @@ class YtDlpManager private constructor(private val appContext: Context) {
             videos: List<Video>
         ): List<Channel> {
             val scored = channels.mapNotNull { ch ->
-                // Channels with < 1000 subscribers are skipped unless their real @handle matches the query perfectly
                 val isExactHandle = isHandleExactMatch(query, ch.handle)
                 if (ch.subscriberCount < 1000 && !isExactHandle) {
                     return@mapNotNull null
                 }
 
                 val similarity = calculateSimilarity(query, ch.title, ch.handle)
-                // Filter out unrelated channels (YouTube channel search result must have at least 0.45 similarity)
                 if (similarity < 0.45) return@mapNotNull null
 
-                // Check if this channel has any video present in the search results
                 val matchingVideo = videos.firstOrNull { v ->
                     v.channelTitle.equals(ch.title, ignoreCase = true) ||
                             (ch.handle.isNotBlank() && v.channelTitle.contains(ch.handle.removePrefix("@"), ignoreCase = true))
@@ -244,8 +316,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
         /**
          * Combines videos and channels into a single unified search list up to maxTotal (default 30).
-         * Places top channel high on the list (positions 1 and 4, within top 5).
-         * Each channel counts towards the maxTotal limit.
          */
         fun mergeSearchResults(
             videos: List<Video>,
@@ -256,40 +326,118 @@ class YtDlpManager private constructor(private val appContext: Context) {
             val videoIter = videos.iterator()
             val channelIter = channels.iterator()
 
-            // 1. Put top video at position 0 (if available)
             if (videoIter.hasNext()) {
                 result.add(SearchResultItem.Video(videoIter.next()))
             }
 
-            // 2. Put #1 channel at position 1 (high in top 5)
             if (channelIter.hasNext() && result.size < maxTotal) {
                 result.add(SearchResultItem.Creator(channelIter.next()))
             }
 
-            // 3. Add next 2 videos (positions 2 and 3)
             var videoCount = 0
             while (videoIter.hasNext() && videoCount < 2 && result.size < maxTotal) {
                 result.add(SearchResultItem.Video(videoIter.next()))
                 videoCount++
             }
 
-            // 4. Put #2 channel at position 4 (high in top 5, if present)
             if (channelIter.hasNext() && result.size < maxTotal) {
                 result.add(SearchResultItem.Creator(channelIter.next()))
             }
 
-            // 5. Fill remaining slots with videos up to maxTotal
             while (videoIter.hasNext() && result.size < maxTotal) {
                 result.add(SearchResultItem.Video(videoIter.next()))
             }
 
-            // 6. If more channels and space remains (e.g. fewer videos)
             while (channelIter.hasNext() && result.size < maxTotal) {
                 result.add(SearchResultItem.Creator(channelIter.next()))
             }
 
             return result
         }
+    }
+
+    /**
+     * Continuous background queue worker: enforces single concurrency on yt-dlp native binaries,
+     * respects polite request spacing to avoid IP blocks, and pauses during rate limits or network drops.
+     */
+    private fun startQueueWorker() {
+        queueScope.launch {
+            while (isActive) {
+                val task = priorityQueue.poll()
+                if (task == null) {
+                    wakeSignal.receive()
+                    continue
+                }
+
+                if (!task.deferred.isActive) {
+                    continue
+                }
+
+                // If device is offline, pause queue until network is validated
+                while (!networkMonitor.isOnline() && isActive) {
+                    Log.d(TAG, "yt-dlp queue paused: device is offline. Waiting for network...")
+                    delay(800)
+                }
+
+                val now = System.currentTimeMillis()
+                // Rate-limit circuit breaker backoff: only bypass for IMMEDIATE playback requests
+                if (now < rateLimitCooldownUntilEpochMs && task.priority != TaskPriority.IMMEDIATE) {
+                    val waitMs = (rateLimitCooldownUntilEpochMs - now).coerceAtLeast(0L)
+                    Log.w(TAG, "yt-dlp queue under rate-limit cooldown (${waitMs / 1000}s remaining). Waiting before executing '${task.tag}'...")
+                    delay(waitMs.coerceAtMost(3000L))
+                    priorityQueue.offer(task)
+                    continue
+                }
+
+                // Enforce polite request spacing to avoid triggering YouTube's bot detection
+                val minSpacing = when (task.priority) {
+                    TaskPriority.IMMEDIATE -> 100L
+                    TaskPriority.INTERACTIVE -> 350L
+                    TaskPriority.BACKGROUND -> 1500L + Random.nextLong(200, 700)
+                }
+                val elapsedSinceLast = now - lastRequestFinishEpochMs
+                if (elapsedSinceLast < minSpacing) {
+                    delay(minSpacing - elapsedSinceLast)
+                }
+
+                try {
+                    task.run()
+                    lastRequestFinishEpochMs = System.currentTimeMillis()
+                    if (consecutiveRateLimits > 0) {
+                        consecutiveRateLimits = 0
+                    }
+                } catch (e: Throwable) {
+                    lastRequestFinishEpochMs = System.currentTimeMillis()
+                    if (isRateLimitError(e)) {
+                        consecutiveRateLimits++
+                        val backoff = (15_000L * (1 shl consecutiveRateLimits.coerceAtMost(3))) + Random.nextLong(1000, 3000)
+                        rateLimitCooldownUntilEpochMs = System.currentTimeMillis() + backoff
+                        Log.e(TAG, "YouTube rate limit or bot challenge detected on '${task.tag}'! Circuit breaker active for ${backoff / 1000}s", e)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Enqueues an operation into the smart rate-limited priority queue.
+     */
+    suspend fun <T> executeQueued(
+        priority: TaskPriority,
+        tag: String,
+        block: suspend () -> T
+    ): T {
+        val deferred = CompletableDeferred<T>()
+        val task = QueuedTask(
+            id = taskCounter.incrementAndGet(),
+            priority = priority,
+            tag = tag,
+            block = block,
+            deferred = deferred
+        )
+        priorityQueue.offer(task)
+        wakeSignal.trySend(Unit)
+        return deferred.await()
     }
 
     /**
@@ -306,10 +454,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
             Log.i(TAG, "Initializing yt-dlp...")
 
             try {
-                // Initialize core yt-dlp binaries
                 YoutubeDL.getInstance().init(appContext)
 
-                // Initialize FFmpeg (for audio postprocessing / remuxing)
                 try {
                     FFmpeg.getInstance().init(appContext)
                     Log.i(TAG, "FFmpeg initialized successfully")
@@ -333,119 +479,125 @@ class YtDlpManager private constructor(private val appContext: Context) {
      * Wipes any corrupted or partially-downloaded binaries in app's internal storage
      * and attempts a clean re-initialization from the APK's bundled assets.
      */
-    suspend fun performSelfRecovery(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            Log.w(TAG, "Starting self-recovery: cleaning up binaries in filesDir...")
-            _state.value = YtDlpState.Initializing
-
-            // Clean directories where youtubedl-android extracts binaries
-            val filesDir = appContext.filesDir
-            val targets = listOf(
-                File(filesDir, "youtubedl"),
-                File(filesDir, "no-pie"),
-                File(filesDir, "bin"),
-                File(appContext.cacheDir, "youtubedl")
-            )
-
-            for (target in targets) {
-                if (target.exists()) {
-                    target.deleteRecursively()
-                    Log.d(TAG, "Deleted: ${target.absolutePath}")
-                }
-            }
-
-            // Retry initialization with a clean slate
-            YoutubeDL.getInstance().init(appContext)
+    suspend fun performSelfRecovery(
+        priority: TaskPriority = TaskPriority.IMMEDIATE
+    ): Boolean = withContext(Dispatchers.IO) {
+        executeQueued(priority, "SelfRecovery") {
             try {
-                FFmpeg.getInstance().init(appContext)
-            } catch (_: Exception) {}
+                Log.w(TAG, "Starting self-recovery: cleaning up binaries in filesDir...")
+                _state.value = YtDlpState.Initializing
 
-            val version = getVersionName()
-            _state.value = YtDlpState.Ready(
-                version = version,
-                statusMessage = "Recovered successfully. Re-initialized to $version"
-            )
-            Log.i(TAG, "Self-recovery succeeded! Current version: $version")
-            true
-        } catch (recoveryError: Throwable) {
-            val msg = "Self-recovery failed: ${recoveryError.message ?: "Unknown error"}"
-            Log.e(TAG, msg, recoveryError)
-            _state.value = YtDlpState.Error(message = msg, canRecover = true)
-            false
+                val filesDir = appContext.filesDir
+                val targets = listOf(
+                    File(filesDir, "youtubedl"),
+                    File(filesDir, "no-pie"),
+                    File(filesDir, "bin"),
+                    File(appContext.cacheDir, "youtubedl")
+                )
+
+                for (target in targets) {
+                    if (target.exists()) {
+                        target.deleteRecursively()
+                        Log.d(TAG, "Deleted: ${target.absolutePath}")
+                    }
+                }
+
+                YoutubeDL.getInstance().init(appContext)
+                try {
+                    FFmpeg.getInstance().init(appContext)
+                } catch (_: Exception) {}
+
+                val version = getVersionName()
+                _state.value = YtDlpState.Ready(
+                    version = version,
+                    statusMessage = "Recovered successfully. Re-initialized to $version"
+                )
+                Log.i(TAG, "Self-recovery succeeded! Current version: $version")
+                true
+            } catch (recoveryError: Throwable) {
+                val msg = "Self-recovery failed: ${recoveryError.message ?: "Unknown error"}"
+                Log.e(TAG, msg, recoveryError)
+                _state.value = YtDlpState.Error(message = msg, canRecover = true)
+                false
+            }
         }
     }
 
     /**
      * Self-patching / Updates yt-dlp to the latest release directly from upstream GitHub releases.
-     * Can target STABLE or MASTER channels.
      */
-    suspend fun update(channel: UpdateChannel = UpdateChannel.STABLE): Result<String> = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val currentVersion = getVersionName()
-            _state.value = YtDlpState.Updating(currentVersion = currentVersion)
-            Log.i(TAG, "Checking for yt-dlp updates (channel: $channel)...")
+    suspend fun update(
+        channel: UpdateChannel = UpdateChannel.STABLE,
+        priority: TaskPriority = TaskPriority.BACKGROUND
+    ): Result<String> = withContext(Dispatchers.IO) {
+        executeQueued(priority, "Update:$channel") {
+            mutex.withLock {
+                val currentVersion = getVersionName()
+                _state.value = YtDlpState.Updating(currentVersion = currentVersion)
+                Log.i(TAG, "Checking for yt-dlp updates (channel: $channel)...")
 
-            try {
-                val updateStatus = YoutubeDL.getInstance().updateYoutubeDL(appContext, channel)
-                val newVersion = getVersionName()
+                try {
+                    val updateStatus = YoutubeDL.getInstance().updateYoutubeDL(appContext, channel)
+                    val newVersion = getVersionName()
 
-                val message = when (updateStatus) {
-                    UpdateStatus.DONE -> "Successfully updated to $newVersion"
-                    UpdateStatus.ALREADY_UP_TO_DATE -> "Already up to date ($newVersion)"
-                    null -> "Update status unknown. Current version: $newVersion"
+                    val message = when (updateStatus) {
+                        UpdateStatus.DONE -> "Successfully updated to $newVersion"
+                        UpdateStatus.ALREADY_UP_TO_DATE -> "Already up to date ($newVersion)"
+                        null -> "Update status unknown. Current version: $newVersion"
+                    }
+
+                    Log.i(TAG, message)
+                    _state.value = YtDlpState.Ready(version = newVersion, statusMessage = message)
+                    Result.Success(message)
+                } catch (e: YoutubeDLException) {
+                    Log.e(TAG, "Failed to update yt-dlp: ${e.message}", e)
+                    val fallbackVersion = getVersionName()
+                    val errorMsg = "Update failed: ${e.message}. Remaining on $fallbackVersion"
+                    _state.value = YtDlpState.Ready(version = fallbackVersion, statusMessage = errorMsg)
+                    Result.Failure(e, errorMsg)
+                } catch (e: Throwable) {
+                    val errorMsg = "Unexpected error during update: ${e.message}"
+                    Log.e(TAG, errorMsg, e)
+                    _state.value = YtDlpState.Error(message = errorMsg, canRecover = true)
+                    Result.Failure(e, errorMsg)
                 }
-
-                Log.i(TAG, message)
-                _state.value = YtDlpState.Ready(version = newVersion, statusMessage = message)
-                Result.Success(message)
-            } catch (e: YoutubeDLException) {
-                Log.e(TAG, "Failed to update yt-dlp: ${e.message}", e)
-                // If update fails, do not brick the app — keep the existing working version if possible
-                val fallbackVersion = getVersionName()
-                val errorMsg = "Update failed: ${e.message}. Remaining on $fallbackVersion"
-                _state.value = YtDlpState.Ready(version = fallbackVersion, statusMessage = errorMsg)
-                Result.Failure(e, errorMsg)
-            } catch (e: Throwable) {
-                val errorMsg = "Unexpected error during update: ${e.message}"
-                Log.e(TAG, errorMsg, e)
-                _state.value = YtDlpState.Error(message = errorMsg, canRecover = true)
-                Result.Failure(e, errorMsg)
             }
         }
     }
 
     /**
      * Fetches metadata for a given YouTube URL or video.
-     * If an extraction error occurs (which commonly happens when YouTube alters player APIs),
-     * it can automatically trigger self-patching and retry once.
      */
-    suspend fun fetchVideoInfo(url: String, autoRetryWithUpdate: Boolean = true): Result<VideoInfo> = withContext(Dispatchers.IO) {
-        try {
-            ensureReady()
-            val info = YoutubeDL.getInstance().getInfo(url)
-            Result.Success(info)
-        } catch (e: YoutubeDLException) {
-            Log.w(TAG, "yt-dlp extraction error for URL: $url: ${e.message}")
-            if (autoRetryWithUpdate) {
-                Log.i(TAG, "Attempting auto-patch update and retry...")
-                val updateResult = update(UpdateChannel.STABLE)
-                if (updateResult is Result.Success) {
-                    return@withContext try {
-                        val retryInfo = YoutubeDL.getInstance().getInfo(url)
-                        Result.Success(retryInfo)
-                    } catch (retryError: Throwable) {
-                        Result.Failure(retryError, "Extraction failed even after updating: ${retryError.message}")
+    suspend fun fetchVideoInfo(
+        url: String,
+        autoRetryWithUpdate: Boolean = true,
+        priority: TaskPriority = TaskPriority.INTERACTIVE
+    ): Result<VideoInfo> = withContext(Dispatchers.IO) {
+        executeQueued(priority, "Info:$url") {
+            try {
+                ensureReady()
+                val info = YoutubeDL.getInstance().getInfo(url)
+                Result.Success(info)
+            } catch (e: YoutubeDLException) {
+                Log.w(TAG, "yt-dlp extraction error for URL: $url: ${e.message}")
+                if (autoRetryWithUpdate) {
+                    Log.i(TAG, "Attempting auto-patch update and retry...")
+                    val updateResult = update(UpdateChannel.STABLE, priority = TaskPriority.IMMEDIATE)
+                    if (updateResult is Result.Success) {
+                        return@executeQueued try {
+                            val retryInfo = YoutubeDL.getInstance().getInfo(url)
+                            Result.Success(retryInfo)
+                        } catch (retryError: Throwable) {
+                            Result.Failure(retryError, "Extraction failed even after updating: ${retryError.message}")
+                        }
                     }
                 }
+                Result.Failure(e, e.message ?: "Failed to fetch video information")
+            } catch (e: Throwable) {
+                Result.Failure(e, e.message ?: "Unexpected error")
             }
-            Result.Failure(e, e.message ?: "Failed to fetch video information")
-        } catch (e: Throwable) {
-            Result.Failure(e, e.message ?: "Unexpected error")
         }
     }
-
-    private val streamUrlCache = mutableMapOf<String, Pair<String, Long>>() // videoId -> (streamUrl, expiryEpochMs)
-    private val streamCacheMutex = Mutex()
 
     /**
      * Invalidates any cached stream URL for the given videoId so next playback forces fresh extraction.
@@ -457,13 +609,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Extracts direct HTTP streaming audio URL for smart streaming playback without downloading the whole file.
-     * Uses fastest format selector (AAC itag 140) and prioritized Android player client to obtain
-     * direct media stream URL in under ~1 second, with automatic in-memory caching and signature recovery.
+     * Extracts direct HTTP streaming audio URL with multi-client fallback:
+     * 1) Android client API (fastest ~700ms)
+     * 2) iOS client API (rate-limit / bot-challenge bypass)
+     * 3) TV embedded client (isolated backend quota)
      */
     suspend fun getAudioStreamUrl(
         videoId: String,
         forceRefresh: Boolean = false,
+        priority: TaskPriority = TaskPriority.IMMEDIATE,
         autoRetryWithUpdate: Boolean = true
     ): Result<String> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -471,7 +625,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
             val cached = streamCacheMutex.withLock { streamUrlCache[videoId] }
             if (cached != null) {
                 val (url, expiryMs) = cached
-                // Use cached URL if it still has at least 15 minutes of validity
                 if (now < (expiryMs - 15 * 60 * 1000L)) {
                     Log.d(TAG, "Serving cached stream URL for $videoId (valid for ${(expiryMs - now) / 60000} more minutes)")
                     return@withContext Result.Success(url)
@@ -479,64 +632,84 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
         }
 
-        try {
-            ensureReady()
-            val videoUrl = if (videoId.startsWith("http")) videoId else "https://www.youtube.com/watch?v=$videoId"
-            val request = YoutubeDLRequest(videoUrl).apply {
-                // itag 140 is m4a AAC 128k (fastest header parse in ExoPlayer), fallback to best audio
-                addOption("-f", "140/ba[ext=m4a]/ba/b")
-                addOption("-g")
-                addOption("--no-playlist")
-                addOption("--skip-download")
-                addOption("--no-warnings")
-                // Use Android client API first: significantly faster JSON response without JS n-sig deciphering overhead
-                addOption("--extractor-args", "youtube:player_client=android,web")
-            }
-            val response = YoutubeDL.getInstance().execute(request)
-            val streamUrl = response.out.trim().lines().firstOrNull { it.startsWith("http") }
-            if (!streamUrl.isNullOrBlank()) {
-                // Parse expiry timestamp from URL (&expire=1710000000) or default to 4 hours
-                var expiryMs = now + (4 * 3600 * 1000L)
-                val expireMatch = Regex("[?&]expire=(\\d+)").find(streamUrl)
-                if (expireMatch != null) {
-                    val expireSec = expireMatch.groupValues[1].toLongOrNull()
-                    if (expireSec != null && expireSec > 0) {
-                        expiryMs = expireSec * 1000L
+        executeQueued(priority, "Stream:$videoId") {
+            try {
+                ensureReady()
+                val videoUrl = if (videoId.startsWith("http")) videoId else "https://www.youtube.com/watch?v=$videoId"
+
+                val clientOptions = listOf(
+                    "youtube:player_client=android,web",
+                    "youtube:player_client=ios,web",
+                    "youtube:player_client=tv_embedded"
+                )
+
+                var lastException: Throwable? = null
+                for (clientArg in clientOptions) {
+                    try {
+                        val request = YoutubeDLRequest(videoUrl).apply {
+                            addOption("-f", "140/ba[ext=m4a]/ba/b")
+                            addOption("-g")
+                            addOption("--no-playlist")
+                            addOption("--skip-download")
+                            addOption("--no-warnings")
+                            addOption("--extractor-args", clientArg)
+                        }
+                        val response = YoutubeDL.getInstance().execute(request)
+                        val streamUrl = response.out.trim().lines().firstOrNull { it.startsWith("http") }
+                        if (!streamUrl.isNullOrBlank()) {
+                            var expiryMs = System.currentTimeMillis() + (4 * 3600 * 1000L)
+                            val expireMatch = Regex("[?&]expire=(\\d+)").find(streamUrl)
+                            if (expireMatch != null) {
+                                val expireSec = expireMatch.groupValues[1].toLongOrNull()
+                                if (expireSec != null && expireSec > 0) {
+                                    expiryMs = expireSec * 1000L
+                                }
+                            }
+                            streamCacheMutex.withLock {
+                                streamUrlCache[videoId] = Pair(streamUrl, expiryMs)
+                            }
+                            Log.d(TAG, "Extracted fresh stream URL for $videoId via client '$clientArg' (expires in ${(expiryMs - System.currentTimeMillis()) / 60000} mins)")
+                            return@executeQueued Result.Success(streamUrl)
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "Stream extraction with client '$clientArg' failed: ${e.message}")
+                        lastException = e
+                        if (!isRateLimitError(e)) {
+                            break
+                        }
                     }
                 }
-                streamCacheMutex.withLock {
-                    streamUrlCache[videoId] = Pair(streamUrl, expiryMs)
+
+                if (autoRetryWithUpdate && lastException is YoutubeDLException) {
+                    Log.i(TAG, "Attempting auto-patch update and retry for stream URL...")
+                    val updateResult = update(UpdateChannel.STABLE, priority = TaskPriority.IMMEDIATE)
+                    if (updateResult is Result.Success) {
+                        return@executeQueued getAudioStreamUrl(videoId, forceRefresh = true, priority = priority, autoRetryWithUpdate = false)
+                    }
                 }
-                Log.d(TAG, "Extracted fresh stream URL for $videoId (expires in ${(expiryMs - now) / 60000} mins)")
-                Result.Success(streamUrl)
-            } else {
-                Result.Failure(IllegalStateException("No stream URL returned: ${response.out}"), "Failed to extract stream URL")
+
+                Result.Failure(lastException ?: IllegalStateException("No stream URL returned"), "Failed to extract audio stream URL")
+            } catch (e: Throwable) {
+                Result.Failure(e, e.message ?: "Unexpected error extracting stream URL")
             }
-        } catch (e: YoutubeDLException) {
-            Log.w(TAG, "yt-dlp stream extraction error for $videoId: ${e.message}")
-            if (autoRetryWithUpdate) {
-                Log.i(TAG, "Attempting auto-patch update and retry for stream URL...")
-                val updateResult = update(UpdateChannel.STABLE)
-                if (updateResult is Result.Success) {
-                    return@withContext getAudioStreamUrl(videoId, forceRefresh = true, autoRetryWithUpdate = false)
-                }
-            }
-            Result.Failure(e, e.message ?: "Failed to extract audio stream URL")
-        } catch (e: Throwable) {
-            Result.Failure(e, e.message ?: "Unexpected error extracting stream URL")
         }
     }
 
     /**
      * Executes custom yt-dlp arguments and returns the raw response.
      */
-    suspend fun executeRaw(request: YoutubeDLRequest): Result<YoutubeDLResponse> = withContext(Dispatchers.IO) {
-        try {
-            ensureReady()
-            val response = YoutubeDL.getInstance().execute(request)
-            Result.Success(response)
-        } catch (e: Throwable) {
-            Result.Failure(e, e.message ?: "Command execution failed")
+    suspend fun executeRaw(
+        request: YoutubeDLRequest,
+        priority: TaskPriority = TaskPriority.INTERACTIVE
+    ): Result<YoutubeDLResponse> = withContext(Dispatchers.IO) {
+        executeQueued(priority, "Raw") {
+            try {
+                ensureReady()
+                val response = YoutubeDL.getInstance().execute(request)
+                Result.Success(response)
+            } catch (e: Throwable) {
+                Result.Failure(e, e.message ?: "Command execution failed")
+            }
         }
     }
 
@@ -548,110 +721,110 @@ class YtDlpManager private constructor(private val appContext: Context) {
         query: String,
         maxResults: Int = 30,
         startIndex: Int = 1,
+        priority: TaskPriority = TaskPriority.INTERACTIVE
     ): Result<List<Video>> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
 
-        try {
-            ensureReady()
-            val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
-                    trimmed.startsWith("https://", ignoreCase = true)
+        executeQueued(priority, "Search:$trimmed:$startIndex") {
+            try {
+                ensureReady()
+                val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
+                        trimmed.startsWith("https://", ignoreCase = true)
 
-            val targetEnd = startIndex + maxResults - 1
-            val searchTarget = if (isDirectUrl) trimmed else "ytsearch$targetEnd:$trimmed"
+                val targetEnd = startIndex + maxResults - 1
+                val searchTarget = if (isDirectUrl) trimmed else "ytsearch$targetEnd:$trimmed"
 
-            val request = YoutubeDLRequest(searchTarget).apply {
-                addOption("--flat-playlist")
-                addOption("--dump-json")
-                addOption("--skip-download")
-                addOption("--no-warnings")
-                addOption("--playlist-start", startIndex.toString())
-                addOption("--playlist-end", targetEnd.toString())
-                addOption("--extractor-args", "youtubetab:approximate_date")
-            }
+                val request = YoutubeDLRequest(searchTarget).apply {
+                    addOption("--flat-playlist")
+                    addOption("--dump-json")
+                    addOption("--skip-download")
+                    addOption("--no-warnings")
+                    addOption("--playlist-start", startIndex.toString())
+                    addOption("--playlist-end", targetEnd.toString())
+                    addOption("--extractor-args", "youtubetab:approximate_date")
+                }
 
-            Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget, range: $startIndex..$targetEnd)")
-            val response = mutex.withLock {
-                YoutubeDL.getInstance().execute(request)
-            }
-            val videos = mutableListOf<Video>()
+                Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget, range: $startIndex..$targetEnd)")
+                val response = YoutubeDL.getInstance().execute(request)
+                val videos = mutableListOf<Video>()
 
-            for (line in response.out.lines()) {
-                val jsonLine = line.trim()
-                if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
-                try {
-                    val json = org.json.JSONObject(jsonLine)
-                    val id = json.optCleanString("id")
-                    if (id.isEmpty()) continue
+                for (line in response.out.lines()) {
+                    val jsonLine = line.trim()
+                    if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
+                    try {
+                        val json = org.json.JSONObject(jsonLine)
+                        val id = json.optCleanString("id")
+                        if (id.isEmpty()) continue
 
-                    val title = json.optCleanString("title", "Untitled")
-                    val uploader = json.optCleanString("uploader").ifEmpty {
-                        json.optCleanString("channel").ifEmpty {
-                            json.optCleanString("uploader_id").ifEmpty {
-                                json.optCleanString("creator").ifEmpty {
-                                    json.optCleanString("channel_id").ifEmpty {
-                                        "Unknown Channel"
+                        val title = json.optCleanString("title", "Untitled")
+                        val uploader = json.optCleanString("uploader").ifEmpty {
+                            json.optCleanString("channel").ifEmpty {
+                                json.optCleanString("uploader_id").ifEmpty {
+                                    json.optCleanString("creator").ifEmpty {
+                                        json.optCleanString("channel_id").ifEmpty {
+                                            "Unknown Channel"
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    val duration = json.optInt("duration", 0)
-                    val timestamp = json.optLong("timestamp", 0L)
-                    val rawDate = json.optCleanString("upload_date")
-                    val releaseDateText = formatRelativeDate(timestamp, rawDate)
+                        val duration = json.optInt("duration", 0)
+                        val timestamp = json.optLong("timestamp", 0L)
+                        val rawDate = json.optCleanString("upload_date")
+                        val releaseDateText = formatRelativeDate(timestamp, rawDate)
 
-                    var thumb = ""
-                    val thumbs = json.optJSONArray("thumbnails")
-                    if (thumbs != null && thumbs.length() > 0) {
-                        // Pick thumbnail closest to ~360px width for silky 120fps scrolling and optimal memory footprint
-                        for (i in 0 until thumbs.length()) {
-                            val tObj = thumbs.optJSONObject(i) ?: continue
-                            val w = tObj.optInt("width", 0)
-                            val u = tObj.optCleanString("url")
-                            if (u.isNotEmpty() && (w in 300..600)) {
-                                thumb = u
-                                break
+                        var thumb = ""
+                        val thumbs = json.optJSONArray("thumbnails")
+                        if (thumbs != null && thumbs.length() > 0) {
+                            for (i in 0 until thumbs.length()) {
+                                val tObj = thumbs.optJSONObject(i) ?: continue
+                                val w = tObj.optInt("width", 0)
+                                val u = tObj.optCleanString("url")
+                                if (u.isNotEmpty() && (w in 300..600)) {
+                                    thumb = u
+                                    break
+                                }
+                            }
+                            if (thumb.isEmpty()) {
+                                thumb = thumbs.optJSONObject(0)?.optCleanString("url") ?: ""
                             }
                         }
                         if (thumb.isEmpty()) {
-                            thumb = thumbs.optJSONObject(0)?.optCleanString("url") ?: ""
+                            thumb = if (id.isNotEmpty()) {
+                                "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+                            } else {
+                                json.optCleanString("thumbnail")
+                            }
                         }
-                    }
-                    if (thumb.isEmpty()) {
-                        thumb = if (id.isNotEmpty()) {
-                            "https://i.ytimg.com/vi/$id/mqdefault.jpg"
-                        } else {
-                            json.optCleanString("thumbnail")
-                        }
-                    }
-                    val parsedChannelId = json.optCleanString("channel_id")
-                    val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
+                        val parsedChannelId = json.optCleanString("channel_id")
+                        val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
 
-                    videos.add(
-                        Video(
-                            id = id,
-                            title = title,
-                            channelTitle = uploader,
-                            durationSeconds = duration,
-                            durationText = formatDuration(duration),
-                            releaseDateText = releaseDateText,
-                            releaseTimestamp = timestamp,
-                            thumbnailUrl = thumb,
-                            webpageUrl = webpageUrl,
-                            channelId = parsedChannelId,
+                        videos.add(
+                            Video(
+                                id = id,
+                                title = title,
+                                channelTitle = uploader,
+                                durationSeconds = duration,
+                                durationText = formatDuration(duration),
+                                releaseDateText = releaseDateText,
+                                releaseTimestamp = timestamp,
+                                thumbnailUrl = thumb,
+                                webpageUrl = webpageUrl,
+                                channelId = parsedChannelId,
+                            )
                         )
-                    )
-                } catch (parseEx: Exception) {
-                    Log.d(TAG, "Skipping line in search output: ${parseEx.message}")
+                    } catch (parseEx: Exception) {
+                        Log.d(TAG, "Skipping line in search output: ${parseEx.message}")
+                    }
                 }
-            }
 
-            Log.i(TAG, "Search completed. Found ${videos.size} videos.")
-            Result.Success(videos)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
-            Result.Failure(e, e.message ?: "Failed to perform search")
+                Log.i(TAG, "Search completed. Found ${videos.size} videos.")
+                Result.Success(videos)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
+                Result.Failure(e, e.message ?: "Failed to perform search")
+            }
         }
     }
 
@@ -660,91 +833,91 @@ class YtDlpManager private constructor(private val appContext: Context) {
      */
     suspend fun searchChannels(
         query: String,
-        maxResults: Int = 3
+        maxResults: Int = 3,
+        priority: TaskPriority = TaskPriority.INTERACTIVE
     ): Result<List<Channel>> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
 
-        try {
-            ensureReady()
-            val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
-            val channelSearchUrl = "https://www.youtube.com/results?search_query=$encodedQuery&sp=EgIQAg%3D%3D"
+        executeQueued(priority, "SearchChannels:$trimmed") {
+            try {
+                ensureReady()
+                val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
+                val channelSearchUrl = "https://www.youtube.com/results?search_query=$encodedQuery&sp=EgIQAg%3D%3D"
 
-            val request = YoutubeDLRequest(channelSearchUrl).apply {
-                addOption("--flat-playlist")
-                addOption("--dump-json")
-                addOption("--skip-download")
-                addOption("--no-warnings")
-                addOption("--playlist-end", maxResults.toString())
-            }
+                val request = YoutubeDLRequest(channelSearchUrl).apply {
+                    addOption("--flat-playlist")
+                    addOption("--dump-json")
+                    addOption("--skip-download")
+                    addOption("--no-warnings")
+                    addOption("--playlist-end", maxResults.toString())
+                }
 
-            Log.i(TAG, "Searching channels for '$trimmed'")
-            val response = mutex.withLock {
-                YoutubeDL.getInstance().execute(request)
-            }
-            val channels = mutableListOf<Channel>()
+                Log.i(TAG, "Searching channels for '$trimmed'")
+                val response = YoutubeDL.getInstance().execute(request)
+                val channels = mutableListOf<Channel>()
 
-            for (line in response.out.lines()) {
-                val jsonLine = line.trim()
-                if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
-                try {
-                    val json = org.json.JSONObject(jsonLine)
-                    val id = json.optCleanString("id").ifEmpty {
-                        json.optCleanString("channel_id")
-                    }
-                    if (id.isEmpty()) continue
+                for (line in response.out.lines()) {
+                    val jsonLine = line.trim()
+                    if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
+                    try {
+                        val json = org.json.JSONObject(jsonLine)
+                        val id = json.optCleanString("id").ifEmpty {
+                            json.optCleanString("channel_id")
+                        }
+                        if (id.isEmpty()) continue
 
-                    val title = json.optCleanString("title").ifEmpty {
-                        json.optCleanString("channel")
-                    }
-                    if (title.isEmpty()) continue
+                        val title = json.optCleanString("title").ifEmpty {
+                            json.optCleanString("channel")
+                        }
+                        if (title.isEmpty()) continue
 
-                    val handle = json.optCleanString("uploader_id").ifEmpty {
-                        json.optCleanString("uploader")
-                    }
-                    val subs = json.optLong("channel_follower_count", 0L)
-                    val subsText = formatSubscriberCount(subs)
+                        val handle = json.optCleanString("uploader_id").ifEmpty {
+                            json.optCleanString("uploader")
+                        }
+                        val subs = json.optLong("channel_follower_count", 0L)
+                        val subsText = formatSubscriberCount(subs)
 
-                    var avatar = ""
-                    val thumbs = json.optJSONArray("thumbnails")
-                    if (thumbs != null && thumbs.length() > 0) {
-                        // Pick avatar closest to ~88-176px for 48dp circle
-                        for (i in 0 until thumbs.length()) {
-                            val tObj = thumbs.optJSONObject(i) ?: continue
-                            val w = tObj.optInt("width", 0)
-                            val u = tObj.optCleanString("url")
-                            if (u.isNotEmpty() && (w in 88..250)) {
-                                avatar = u
-                                break
+                        var avatar = ""
+                        val thumbs = json.optJSONArray("thumbnails")
+                        if (thumbs != null && thumbs.length() > 0) {
+                            for (i in 0 until thumbs.length()) {
+                                val tObj = thumbs.optJSONObject(i) ?: continue
+                                val w = tObj.optInt("width", 0)
+                                val u = tObj.optCleanString("url")
+                                if (u.isNotEmpty() && (w in 88..250)) {
+                                    avatar = u
+                                    break
+                                }
+                            }
+                            if (avatar.isEmpty()) {
+                                avatar = thumbs.getJSONObject(0).optCleanString("url")
                             }
                         }
-                        if (avatar.isEmpty()) {
-                            avatar = thumbs.getJSONObject(0).optCleanString("url")
+                        if (avatar.startsWith("//")) {
+                            avatar = "https:$avatar"
                         }
-                    }
-                    if (avatar.startsWith("//")) {
-                        avatar = "https:$avatar"
-                    }
 
-                    channels.add(
-                        Channel(
-                            id = id,
-                            title = title,
-                            handle = handle,
-                            avatarUrl = avatar,
-                            subscriberCount = subs,
-                            subscriberCountText = subsText
+                        channels.add(
+                            Channel(
+                                id = id,
+                                title = title,
+                                handle = handle,
+                                avatarUrl = avatar,
+                                subscriberCount = subs,
+                                subscriberCountText = subsText
+                            )
                         )
-                    )
-                } catch (e: Exception) {
-                    Log.d(TAG, "Skipping channel parse error: ${e.message}")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Skipping channel parse error: ${e.message}")
+                    }
                 }
-            }
 
-            Result.Success(channels)
-        } catch (e: Throwable) {
-            Log.w(TAG, "Channel search encountered error: ${e.message}")
-            Result.Success(emptyList()) // Non-fatal, gracefully fall back to video results
+                Result.Success(channels)
+            } catch (e: Throwable) {
+                Log.w(TAG, "Channel search encountered error: ${e.message}")
+                Result.Success(emptyList())
+            }
         }
     }
 
@@ -757,6 +930,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         handle: String = "",
         channelTitle: String = "",
         maxResults: Int = 5,
+        priority: TaskPriority = TaskPriority.BACKGROUND
     ): Result<List<Video>> = withContext(Dispatchers.IO) {
         val target = when {
             channelId.startsWith("UC") -> "https://www.youtube.com/channel/$channelId/videos"
@@ -770,11 +944,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
             return@withContext Result.Success(emptyList())
         }
 
-        // Try direct playlist URL first; if empty or fails, fall back to channel name search
         val primaryResult = if (target.isNotEmpty()) {
-            searchContent(target, maxResults = maxResults)
+            searchContent(target, maxResults = maxResults, priority = priority)
         } else {
-            searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults)
+            searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, priority = priority)
         }
 
         when (primaryResult) {
@@ -788,8 +961,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 if (videos.isNotEmpty()) {
                     Result.Success(videos)
                 } else if (channelTitle.isNotBlank() && target.isNotEmpty()) {
-                    // Fallback to name search if direct channel URL returned 0 videos
-                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults)
+                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, priority = priority)
                     if (fallback is Result.Success) {
                         Result.Success(fallback.data.map { it.copy(channelId = channelId) })
                     } else fallback
@@ -799,7 +971,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
             is Result.Failure -> {
                 if (channelTitle.isNotBlank() && target.isNotEmpty()) {
-                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults)
+                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, priority = priority)
                     if (fallback is Result.Success) {
                         Result.Success(fallback.data.map { it.copy(channelId = channelId) })
                     } else primaryResult
