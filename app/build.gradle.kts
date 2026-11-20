@@ -81,8 +81,9 @@ dependencies {
     implementation(libs.youtubedl.android.library)
     implementation(libs.youtubedl.android.ffmpeg)
 
-    // Media3 ExoPlayer
+    // Media3 ExoPlayer & MediaSession
     implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)

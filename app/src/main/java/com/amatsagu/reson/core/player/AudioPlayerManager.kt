@@ -1,11 +1,16 @@
 package com.amatsagu.reson.core.player
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -15,6 +20,8 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.session.MediaSession
+import com.amatsagu.reson.MainActivity
 import com.amatsagu.reson.core.network.NetworkMonitor
 import com.amatsagu.reson.core.network.NetworkTransition
 import com.amatsagu.reson.model.Video
@@ -60,6 +67,7 @@ class AudioPlayerManager(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val networkMonitor = NetworkMonitor.getInstance(context)
+    private var mediaSession: MediaSession? = null
     private var tickerJob: Job? = null
     private var isPlayingLocal = false
     private var lastSavedPositionMs = 0L
@@ -71,63 +79,6 @@ class AudioPlayerManager(
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
-
-    init {
-        scope.launch {
-            networkMonitor.transitions.collect { transition ->
-                handleNetworkTransition(transition)
-            }
-        }
-    }
-
-    private val exoPlayer: ExoPlayer by lazy {
-        // Low-latency buffer tuning for audio: start playing after 500ms buffer, recover from rebuffers in 1s
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                /* minBufferMs = */ 15_000,
-                /* maxBufferMs = */ 60_000,
-                /* bufferForPlaybackMs = */ 500,
-                /* bufferForPlaybackAfterRebufferMs = */ 1_000
-            )
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
-
-        // Robust HTTP data source with mobile Chrome User-Agent and increased timeouts for 4G/5G
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(20_000)
-            .setAllowCrossProtocolRedirects(true)
-            .setKeepPostFor302Redirects(true)
-
-        val loadErrorHandlingPolicy = object : DefaultLoadErrorHandlingPolicy(
-            /* minimumLoadableRetryCount = */ 5
-        ) {
-            override fun getRetryDelayMsFor(loadErrorInfo: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo): Long {
-                return 600L.coerceAtLeast(super.getRetryDelayMsFor(loadErrorInfo))
-            }
-        }
-
-        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-
-        val mediaSourceFactory = DefaultMediaSourceFactory(context)
-            .setDataSourceFactory(dataSourceFactory)
-            .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
-
-        ExoPlayer.Builder(context)
-            .setLoadControl(loadControl)
-            .setMediaSourceFactory(mediaSourceFactory)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
-                    .setUsage(C.USAGE_MEDIA)
-                    .build(),
-                /* handleAudioFocus = */ true
-            )
-            .build().apply {
-                addListener(playerListener)
-            }
-    }
 
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -263,6 +214,83 @@ class AudioPlayerManager(
         }
     }
 
+    private val exoPlayer: ExoPlayer by lazy {
+        // Low-latency buffer tuning for audio: start playing after 500ms buffer, recover from rebuffers in 1s
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 60_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        // Robust HTTP data source with mobile Chrome User-Agent and increased timeouts for 4G/5G
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+            .setAllowCrossProtocolRedirects(true)
+            .setKeepPostFor302Redirects(true)
+
+        val loadErrorHandlingPolicy = object : DefaultLoadErrorHandlingPolicy(
+            /* minimumLoadableRetryCount = */ 5
+        ) {
+            override fun getRetryDelayMsFor(loadErrorInfo: androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+                return 600L.coerceAtLeast(super.getRetryDelayMsFor(loadErrorInfo))
+            }
+        }
+
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(dataSourceFactory)
+            .setLoadErrorHandlingPolicy(loadErrorHandlingPolicy)
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+                    .setUsage(C.USAGE_MEDIA)
+                    .build(),
+                /* handleAudioFocus = */ true
+            )
+            .setHandleAudioBecomingNoisy(true)
+            .setSeekBackIncrementMs(10_000L)
+            .setSeekForwardIncrementMs(10_000L)
+            .build().apply {
+                addListener(playerListener)
+            }
+    }
+
+    init {
+        val sessionActivityIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            0,
+            sessionActivityIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val session = MediaSession.Builder(context, exoPlayer)
+            .setSessionActivity(pendingIntent)
+            .setId("ResonMediaSession")
+            .build()
+        mediaSession = session
+        activeMediaSession = session
+
+        scope.launch {
+            networkMonitor.transitions.collect { transition ->
+                handleNetworkTransition(transition)
+            }
+        }
+    }
+
+
     private fun handleNetworkTransition(transition: NetworkTransition) {
         if (isPlayingLocal) {
             Log.d(TAG, "Ignoring network transition ${transition::class.simpleName} during local file playback")
@@ -366,9 +394,16 @@ class AudioPlayerManager(
                     )
                 }
 
+                val metadata = MediaMetadata.Builder()
+                    .setTitle(video.title)
+                    .setArtist(video.channelTitle)
+                    .setArtworkUri(if (video.thumbnailUrl.isNotBlank()) Uri.parse(video.thumbnailUrl) else null)
+                    .build()
+
                 val mediaItem = MediaItem.Builder()
                     .setUri(mediaUri)
                     .setMediaId(video.id)
+                    .setMediaMetadata(metadata)
                     .build()
 
                 // Set media item with start position atomically before prepare() to prevent Progressive seek races
@@ -376,6 +411,7 @@ class AudioPlayerManager(
                 exoPlayer.prepare()
                 exoPlayer.play()
                 startProgressTicker()
+                startForegroundPlaybackService()
                 Log.d(TAG, "Playback initialized for '${video.title}' (isLocal=$isLocal) starting at $safePosition ms")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start playback for ${video.id}", e)
@@ -398,15 +434,23 @@ class AudioPlayerManager(
             val video = _playbackState.value.currentVideo ?: return@launch
             try {
                 Log.i(TAG, "Applying fresh stream URL for '${video.title}' at $positionMs ms")
+                val metadata = MediaMetadata.Builder()
+                    .setTitle(video.title)
+                    .setArtist(video.channelTitle)
+                    .setArtworkUri(if (video.thumbnailUrl.isNotBlank()) Uri.parse(video.thumbnailUrl) else null)
+                    .build()
+
                 val mediaItem = MediaItem.Builder()
                     .setUri(newUrl)
                     .setMediaId(video.id)
+                    .setMediaMetadata(metadata)
                     .build()
 
                 exoPlayer.setMediaItem(mediaItem, positionMs.coerceAtLeast(0L))
                 exoPlayer.prepare()
                 exoPlayer.play()
                 startProgressTicker()
+                startForegroundPlaybackService()
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to resume with fresh stream URL", e)
                 _playbackState.update {
@@ -417,6 +461,15 @@ class AudioPlayerManager(
                     )
                 }
             }
+        }
+    }
+
+    private fun startForegroundPlaybackService() {
+        try {
+            val serviceIntent = Intent(context, ResonPlaybackService::class.java)
+            ContextCompat.startForegroundService(context, serviceIntent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start ResonPlaybackService", e)
         }
     }
 
@@ -491,7 +544,13 @@ class AudioPlayerManager(
             wasPlayingBeforeNetworkLoss = false
             stallPositionMs = 0L
             exoPlayer.stop()
+            exoPlayer.clearMediaItems()
             stopProgressTicker()
+            try {
+                context.stopService(Intent(context, ResonPlaybackService::class.java))
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not stop ResonPlaybackService", e)
+            }
             _playbackState.update {
                 it.copy(
                     currentVideo = null,
@@ -508,6 +567,9 @@ class AudioPlayerManager(
     fun release() {
         stopProgressTicker()
         exoPlayer.removeListener(playerListener)
+        mediaSession?.release()
+        mediaSession = null
+        activeMediaSession = null
         exoPlayer.release()
         scope.cancel()
     }
@@ -592,5 +654,9 @@ class AudioPlayerManager(
     companion object {
         private const val TAG = "Reson:AudioPlayer"
         private const val MAX_RECOVERY_ATTEMPTS = 3
+
+        @Volatile
+        var activeMediaSession: MediaSession? = null
+            internal set
     }
 }
