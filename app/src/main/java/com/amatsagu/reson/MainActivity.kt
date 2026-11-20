@@ -92,12 +92,13 @@ fun ResonApp(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
+                val playbackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
                 ResonUnifiedBottomBar(
                     currentVideo = uiState.currentPlayingVideo,
                     isPlaying = uiState.isPlaying,
                     isBuffering = uiState.isAudioBuffering,
-                    positionMs = uiState.playbackPositionMs,
-                    durationMs = uiState.playbackDurationMs,
+                    positionMs = playbackState.currentPositionMs,
+                    durationMs = if (playbackState.durationMs > 0) playbackState.durationMs else uiState.playbackDurationMs,
                     onPlayPauseClick = { viewModel.togglePlayPause() },
                     onSeek = { viewModel.seekTo(it) },
                     onCloseClick = { viewModel.closePlayer() },

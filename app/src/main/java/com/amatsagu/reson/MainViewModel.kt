@@ -132,6 +132,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     )
 
+    /** Dedicated playback state flow to isolate high-frequency position updates from main UI state */
+    val audioPlaybackState: StateFlow<com.amatsagu.reson.core.player.PlaybackState> = audioPlayerManager.playbackState
+
     init {
         addLog("App started. Initializing...")
 
@@ -259,18 +262,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe Audio Player playback state
+        // Observe Audio Player playback state.
+        // High-frequency position ticks are isolated to audioPlaybackState to maintain rock-solid 120 FPS
+        // on the main screen and avoid unnecessary whole-screen recompositions during scrolling.
         viewModelScope.launch {
             audioPlayerManager.playbackState.collect { playback ->
                 _uiState.update { current ->
-                    current.copy(
-                        isPlaying = playback.isPlaying,
-                        isAudioBuffering = playback.isBuffering,
-                        playbackPositionMs = playback.currentPositionMs,
-                        playbackDurationMs = playback.durationMs,
-                        playbackProgress = playback.progress,
-                        playbackErrorMessage = playback.errorMessage
-                    )
+                    if (current.isPlaying != playback.isPlaying ||
+                        current.isAudioBuffering != playback.isBuffering ||
+                        current.playbackDurationMs != playback.durationMs ||
+                        current.playbackErrorMessage != playback.errorMessage
+                    ) {
+                        current.copy(
+                            isPlaying = playback.isPlaying,
+                            isAudioBuffering = playback.isBuffering,
+                            playbackDurationMs = playback.durationMs,
+                            playbackErrorMessage = playback.errorMessage
+                        )
+                    } else {
+                        current
+                    }
                 }
                 if (playback.isPlaying) {
                     playWatchdogJob?.cancel()

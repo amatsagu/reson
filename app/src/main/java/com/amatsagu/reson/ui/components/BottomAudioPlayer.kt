@@ -12,11 +12,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -46,10 +44,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -81,31 +84,34 @@ fun formatPlaybackTime(ms: Long): String {
 
 /**
  * Interactive audio progress bar matching Reson's design language:
- * 4dp flat rounded track with NO circle thumb dot, supporting both tap-to-seek and drag-to-seek.
+ * Flat rounded track with NO circle thumb dot, supporting both tap-to-seek and drag-to-seek.
+ *
+ * Mathematically scaled thickness based on Continue Section progress bar:
+ * ContinueCard progress bar is 4dp high across 124dp width (ratio = 4/124).
+ * Main audio player thickness scales proportionally with width (size.width * (4f / 124f)),
+ * rendered directly in the Draw phase (drawWithCache) for 120 FPS zero-recomposition performance.
  */
 @Composable
 fun InteractiveResonProgressBar(
     progress: Float,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    progressColor: Color = MaterialTheme.colorScheme.primary,
 ) {
     var isDragging by remember { mutableStateOf(false) }
-    var localRatio by remember { mutableFloatStateOf(progress) }
+    var dragRatio by remember { mutableFloatStateOf(0f) }
+    val currentProgress by rememberUpdatedState(progress)
 
-    LaunchedEffect(progress) {
-        if (!isDragging) {
-            localRatio = progress.coerceIn(0f, 1f)
-        }
-    }
+    val displayRatio = if (isDragging) dragRatio else currentProgress
 
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(24.dp)
+            .height(28.dp)
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
                     val newRatio = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                    localRatio = newRatio
                     onSeek(newRatio)
                 }
             }
@@ -113,45 +119,51 @@ fun InteractiveResonProgressBar(
                 detectHorizontalDragGestures(
                     onDragStart = { offset ->
                         isDragging = true
-                        val newRatio = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        localRatio = newRatio
+                        dragRatio = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
                     },
                     onHorizontalDrag = { change, _ ->
                         change.consume()
-                        val newRatio = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        localRatio = newRatio
+                        dragRatio = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
                     },
                     onDragEnd = {
                         isDragging = false
-                        onSeek(localRatio)
+                        onSeek(dragRatio)
                     },
                     onDragCancel = {
                         isDragging = false
-                        localRatio = progress.coerceIn(0f, 1f)
                     }
                 )
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        val totalWidth = maxWidth
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-        ) {
-            if (localRatio > 0f) {
-                Box(
-                    modifier = Modifier
-                        .width(totalWidth * localRatio)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.primary)
-                )
             }
-        }
-    }
+            .drawWithCache {
+                // Mathematically scaled thickness:
+                // Continue Section progress bar has height 4dp across 124dp width (ratio = 4/124).
+                // Main audio player scales height proportionally to its rendered width:
+                val trackHeight = size.width * (4f / 124f)
+                val cornerRadius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
+                val yOffset = (size.height - trackHeight) / 2f
+
+                onDrawBehind {
+                    // Background track
+                    drawRoundRect(
+                        color = trackColor,
+                        topLeft = Offset(0f, yOffset),
+                        size = Size(size.width, trackHeight),
+                        cornerRadius = cornerRadius
+                    )
+
+                    // Active progress
+                    val clampedRatio = displayRatio.coerceIn(0f, 1f)
+                    if (clampedRatio > 0f) {
+                        drawRoundRect(
+                            color = progressColor,
+                            topLeft = Offset(0f, yOffset),
+                            size = Size(size.width * clampedRatio, trackHeight),
+                            cornerRadius = cornerRadius
+                        )
+                    }
+                }
+            }
+    )
 }
 
 /**

@@ -31,6 +31,9 @@ class ResonApplication : Application(), ImageLoaderFactory {
                     .maxSizeBytes(50L * 1024 * 1024)
                     .build()
             }
+            .bitmapConfig(android.graphics.Bitmap.Config.HARDWARE)
+            .allowHardware(true)
+            .allowRgb565(true)
             .crossfade(enable = false)
             .respectCacheHeaders(enable = false)
             .build()
