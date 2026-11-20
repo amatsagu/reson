@@ -300,12 +300,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe recent uploads for the channels section (max 5 per channel)
+        // Observe uploads for the channels section (all followed channels within the last month)
         viewModelScope.launch {
-            databaseManager.observeRecentVideosFromFollowed(maxPerChannel = 5).collect { videos ->
+            databaseManager.observeVideosFromFollowedWithinMonth(limit = PAGE_SIZE).collect { videos ->
                 _uiState.update { current ->
                     if (current.selectedChannelId == null) {
-                        current.copy(channelVideos = videos)
+                        current.copy(
+                            channelVideos = videos,
+                            canLoadMoreChannelVideos = videos.size >= PAGE_SIZE
+                        )
                     } else {
                         current
                     }
@@ -585,7 +588,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Filters the recent uploads list to a specific channel (or null for All channels).
+     * Filters the channels section:
+     * - When channelId is null (All channels): shows all videos from all followed channels within the last 1 month, ordered by release date.
+     * - When channelId is specified: shows all videos from that specific channel with full infinite scroll catalog.
      */
     fun selectChannelFilter(channelId: String?) {
         _uiState.update {
@@ -598,11 +603,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         channelFilterJob?.cancel()
         channelFilterJob = viewModelScope.launch(ResonDispatchers.Database) {
             val videos = if (channelId == null) {
-                databaseManager.getRecentVideosFromFollowed(maxPerChannel = 5, limit = PAGE_SIZE, offset = 0)
+                databaseManager.getVideosFromFollowedWithinMonth(limit = PAGE_SIZE, offset = 0)
             } else {
-                databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
+                val cached = databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
+                if (cached.size < PAGE_SIZE) {
+                    val ch = _uiState.value.followedChannelList.find { it.id == channelId }
+                        ?: databaseManager.getFollowedChannels().find { it.id == channelId }
+                    val result = withContext(ResonDispatchers.Network) {
+                        ytDlpManager.fetchChannelVideos(
+                            channelId = channelId,
+                            handle = ch?.handle.orEmpty(),
+                            channelTitle = ch?.title.orEmpty(),
+                            startIndex = 1,
+                            maxResults = PAGE_SIZE
+                        )
+                    }
+                    if (result is Result.Success && result.data.isNotEmpty()) {
+                        databaseManager.upsertVideos(result.data, defaultChannelId = channelId)
+                        databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
+                    } else {
+                        cached
+                    }
+                } else {
+                    cached
+                }
             }
-            _uiState.update { it.copy(channelVideos = videos, canLoadMoreChannelVideos = videos.size >= PAGE_SIZE) }
+            val canLoadMore = if (channelId == null) {
+                videos.size >= PAGE_SIZE
+            } else {
+                videos.isNotEmpty()
+            }
+            _uiState.update { it.copy(channelVideos = videos, canLoadMoreChannelVideos = canLoadMore) }
         }
     }
 
@@ -662,6 +693,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Infinite scroll pagination: loads next page of channel uploads.
+     * - When viewing All Channels: loads next batch from DB cut off to 1 month.
+     * - When viewing a specific channel: loads from DB; if DB is exhausted, fetches next windowed slice from YouTube.
      */
     fun loadMoreChannelVideos() {
         val state = _uiState.value
@@ -673,9 +706,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val selectedId = _uiState.value.selectedChannelId
 
             val nextBatch = if (selectedId == null) {
-                databaseManager.getRecentVideosFromFollowed(maxPerChannel = 5, limit = PAGE_SIZE, offset = currentOffset)
+                databaseManager.getVideosFromFollowedWithinMonth(limit = PAGE_SIZE, offset = currentOffset)
             } else {
-                databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = currentOffset)
+                var localBatch = databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = currentOffset)
+                if (localBatch.isEmpty()) {
+                    // Fetch next page directly from YouTube via yt-dlp windowed pagination
+                    val ch = _uiState.value.followedChannelList.find { it.id == selectedId }
+                        ?: databaseManager.getFollowedChannels().find { it.id == selectedId }
+                    val result = withContext(ResonDispatchers.Network) {
+                        ytDlpManager.fetchChannelVideos(
+                            channelId = selectedId,
+                            handle = ch?.handle.orEmpty(),
+                            channelTitle = ch?.title.orEmpty(),
+                            startIndex = currentOffset + 1,
+                            maxResults = PAGE_SIZE
+                        )
+                    }
+                    if (result is Result.Success && result.data.isNotEmpty()) {
+                        databaseManager.upsertVideos(result.data, defaultChannelId = selectedId)
+                        localBatch = databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = currentOffset)
+                        if (localBatch.isEmpty()) {
+                            result.data
+                        } else {
+                            localBatch
+                        }
+                    } else {
+                        emptyList()
+                    }
+                } else {
+                    localBatch
+                }
             }
 
             _uiState.update { current ->
@@ -785,12 +845,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // 2. Fetch latest videos for this channel via yt-dlp
+            // 2. Fetch latest videos for this channel via yt-dlp (up to 20 to capture recent uploads)
             val result = ytDlpManager.fetchChannelVideos(
                 channelId = channel.id,
                 handle = channel.handle,
                 channelTitle = channel.title,
-                maxResults = 5
+                maxResults = 20
             )
             when (result) {
                 is Result.Success -> {
@@ -826,12 +886,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // Check for new uploads
+                // Check for new uploads (up to 20 to capture all uploads within the month)
                 val result = ytDlpManager.fetchChannelVideos(
                     channelId = ch.id,
                     handle = ch.handle,
                     channelTitle = ch.title,
-                    maxResults = 5
+                    maxResults = 20
                 )
                 if (result is Result.Success && result.data.isNotEmpty()) {
                     databaseManager.upsertVideos(result.data, defaultChannelId = ch.id)

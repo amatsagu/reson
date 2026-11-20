@@ -298,4 +298,11 @@ class YtDlpManagerTest {
         org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("HTTP Error 429: Too Many Requests")))
         org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("Network connection timed out")))
     }
+
+    @Test
+    fun testFormatRelativeDate_rawUploadDateFallback() {
+        val dateText = YtDlpManager.formatRelativeDate(0L, "20260101")
+        assertTrue(dateText.isNotEmpty())
+    }
 }
+

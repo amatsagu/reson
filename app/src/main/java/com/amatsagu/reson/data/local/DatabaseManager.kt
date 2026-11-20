@@ -243,6 +243,33 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
     }.flowOn(dispatcher)
 
+    /**
+     * Gets all videos from followed channels released within the last 1 month (cutoff: 30 days ago),
+     * ordered by release date/time DESC with pagination support.
+     */
+    suspend fun getVideosFromFollowedWithinMonth(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
+        val nowMs = System.currentTimeMillis()
+        val oneMonthAgoSec = (nowMs / 1000L) - (30L * 24L * 3600L)
+        val oneMonthAgoMs = nowMs - (30L * 24L * 3600L * 1000L)
+        val db = dbHelper.readableDatabase
+        videoDao.getVideosFromFollowedWithinMonth(
+            db = db,
+            minTimestampSec = oneMonthAgoSec,
+            minCreatedAtMs = oneMonthAgoMs,
+            limit = limit,
+            offset = offset
+        )
+    }
+
+    /**
+     * Reactive Flow observing all videos from all followed channels within the last 1 month.
+     */
+    fun observeVideosFromFollowedWithinMonth(limit: Int = 30): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getVideosFromFollowedWithinMonth(limit, offset = 0))
+        }
+    }.flowOn(dispatcher)
+
     /* -------------------------------------------------------------------------
      * Playback & Continue Listening API
      * ------------------------------------------------------------------------- */

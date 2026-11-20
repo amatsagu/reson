@@ -136,6 +136,34 @@ class VideoDao {
         return videos
     }
 
+    /**
+     * Fetches all videos from followed channels released within the last 1 month (cutoff: minTimestampSec),
+     * ordered by release date/time (newest first).
+     */
+    fun getVideosFromFollowedWithinMonth(
+        db: SQLiteDatabase,
+        minTimestampSec: Long,
+        minCreatedAtMs: Long,
+        limit: Int = 30,
+        offset: Int = 0
+    ): List<Video> {
+        val videos = mutableListOf<Video>()
+        val query = """
+            SELECT v.* FROM videos v
+            INNER JOIN channels c ON v.channel_id = c.id
+            WHERE c.is_followed = 1
+              AND ((v.release_timestamp > 0 AND v.release_timestamp >= ?) OR (v.release_timestamp <= 0 AND v.created_at >= ?))
+            ORDER BY v.release_timestamp DESC, v.created_at DESC
+            LIMIT ? OFFSET ?
+        """.trimIndent()
+        db.rawQuery(query, arrayOf(minTimestampSec.toString(), minCreatedAtMs.toString(), limit.toString(), offset.toString())).use { cursor ->
+            while (cursor.moveToNext()) {
+                videos.add(cursorToVideo(cursor))
+            }
+        }
+        return videos
+    }
+
     fun getDownloadedVideos(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
         val videos = mutableListOf<Video>()
         val query = "SELECT * FROM videos WHERE is_downloaded = 1 ORDER BY last_played_at DESC, created_at DESC LIMIT ? OFFSET ?"

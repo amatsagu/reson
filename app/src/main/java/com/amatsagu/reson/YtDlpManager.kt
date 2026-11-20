@@ -1177,8 +1177,22 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             }
                         }
                         val duration = json.optInt("duration", 0)
-                        val timestamp = json.optLong("timestamp", 0L)
+                        val rawTimestamp = json.optLong("timestamp", 0L)
                         val rawDate = json.optCleanString("upload_date")
+                        val timestamp = if (rawTimestamp > 0L) {
+                            rawTimestamp
+                        } else if (rawDate.length == 8 && rawDate.all { it.isDigit() }) {
+                            try {
+                                val sdf = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).apply {
+                                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                                }
+                                sdf.parse(rawDate)?.time?.div(1000L) ?: 0L
+                            } catch (_: Exception) {
+                                0L
+                            }
+                        } else {
+                            0L
+                        }
                         val releaseDateText = formatRelativeDate(timestamp, rawDate)
 
                         var thumb = ""
@@ -1514,14 +1528,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Fetches recent videos from a channel using its ID or handle with --flat-playlist and --playlist-end.
-     * Guaranteed to extract up to maxResults videos cleanly.
+     * Fetches videos from a channel using its ID or handle with windowed pagination (--playlist-start and --playlist-end).
+     * Automatically filters out private, membership-only, and locked videos.
      */
     suspend fun fetchChannelVideos(
         channelId: String,
         handle: String = "",
         channelTitle: String = "",
-        maxResults: Int = 5,
+        maxResults: Int = 30,
+        startIndex: Int = 1,
         priority: TaskPriority = TaskPriority.BACKGROUND
     ): Result<List<Video>> = withContext(networkDispatcher) {
         val target = when {
@@ -1537,9 +1552,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         val primaryResult = if (target.isNotEmpty()) {
-            searchContent(target, maxResults = maxResults, priority = priority)
+            searchContent(target, maxResults = maxResults, startIndex = startIndex, priority = priority)
         } else {
-            searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, priority = priority)
+            val targetEnd = startIndex + maxResults - 1
+            searchContent("ytsearch$targetEnd:$channelTitle", maxResults = maxResults, startIndex = startIndex, priority = priority)
         }
 
         when (primaryResult) {
@@ -1553,7 +1569,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 if (videos.isNotEmpty()) {
                     Result.Success(videos)
                 } else if (channelTitle.isNotBlank() && target.isNotEmpty()) {
-                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, priority = priority)
+                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, startIndex = startIndex, priority = priority)
                     if (fallback is Result.Success) {
                         Result.Success(fallback.data.map { it.copy(channelId = channelId) })
                     } else fallback
@@ -1563,7 +1579,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
             is Result.Failure -> {
                 if (channelTitle.isNotBlank() && target.isNotEmpty()) {
-                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, priority = priority)
+                    val fallback = searchContent("ytsearch$maxResults:$channelTitle", maxResults = maxResults, startIndex = startIndex, priority = priority)
                     if (fallback is Result.Success) {
                         Result.Success(fallback.data.map { it.copy(channelId = channelId) })
                     } else primaryResult
