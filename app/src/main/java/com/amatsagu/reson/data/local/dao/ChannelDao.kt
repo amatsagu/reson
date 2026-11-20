@@ -114,6 +114,8 @@ class ChannelDao {
         val subsText = cursor.getString(cursor.getColumnIndexOrThrow("subscriber_count_text"))
         val isFollowed = cursor.getInt(cursor.getColumnIndexOrThrow("is_followed")) == 1
         val followedAt = cursor.getLong(cursor.getColumnIndexOrThrow("followed_at"))
+        val lastSyncAtIndex = cursor.getColumnIndex("last_sync_at")
+        val lastSyncAt = if (lastSyncAtIndex >= 0) cursor.getLong(lastSyncAtIndex) else 0L
         return Channel(
             id = id,
             title = title,
@@ -124,6 +126,7 @@ class ChannelDao {
             subscriberCountText = subsText,
             isFollowed = isFollowed,
             followedAt = followedAt,
+            lastSyncAt = lastSyncAt,
         )
     }
 }

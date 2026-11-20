@@ -145,6 +145,16 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
     }.flowOn(dispatcher)
 
+    /**
+     * Updates the last sync timestamp for a channel.
+     */
+    suspend fun updateChannelLastSyncTime(channelId: String, timestamp: Long = System.currentTimeMillis()): Unit = withContext(dispatcher) {
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            channelDao.updateLastSyncTime(db, channelId, timestamp)
+        }
+    }
+
     /* -------------------------------------------------------------------------
      * Videos / Feed API
      * ------------------------------------------------------------------------- */

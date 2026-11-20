@@ -44,6 +44,7 @@ data class Channel(
     val isFollowed: Boolean = false,
     val lastVideoReleaseSec: Long = 0L,
     val followedAt: Long = 0L,
+    val lastSyncAt: Long = 0L,
 )
 
 /**

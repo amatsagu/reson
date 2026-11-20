@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import com.amatsagu.reson.core.player.AudioPlayerManager
 import com.amatsagu.reson.data.SearchSuggestClient
+import com.amatsagu.reson.data.remote.YouTubeRssFetcher
 import com.amatsagu.reson.data.local.AvatarManager
 import com.amatsagu.reson.data.local.DatabaseManager
 import com.amatsagu.reson.data.local.DatabaseStats
@@ -21,6 +22,7 @@ import com.amatsagu.reson.model.Video
 import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel as KChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +30,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.io.OutputStream
@@ -67,6 +71,8 @@ data class MainUiState(
     // Feed / Home Content
     val continueVideos: List<Video> = emptyList(),
     val feedVideos: List<Video> = emptyList(),
+    val lastFeedSyncedAt: Long = 0L,
+    val lastChannelsSyncedAt: Long = 0L,
 
     // Library Content
     val historyVideos: List<Video> = emptyList(),
@@ -189,6 +195,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         addLog("App started. Initializing...")
+
+        _uiState.update {
+            it.copy(
+                lastFeedSyncedAt = userPreferences.lastFeedSyncTime.value,
+                lastChannelsSyncedAt = userPreferences.lastChannelsSyncTime.value
+            )
+        }
 
         // Initial database stats load and clean missing offline files
         refreshDatabaseStats()
@@ -671,7 +684,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 offset = 0,
                 excludeIds = continueIds + historyIds
             )
-            _uiState.update { it.copy(feedVideos = freshFeed, isFeedRefreshing = false, canLoadMoreFeed = freshFeed.size >= PAGE_SIZE) }
+            val now = System.currentTimeMillis()
+            userPreferences.updateLastFeedSyncTime(now)
+            _uiState.update {
+                it.copy(
+                    feedVideos = freshFeed,
+                    isFeedRefreshing = false,
+                    canLoadMoreFeed = freshFeed.size >= PAGE_SIZE,
+                    lastFeedSyncedAt = now
+                )
+            }
         }
     }
 
@@ -917,42 +939,100 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Syncs all followed channels: downloads any missing avatars and checks for new uploads.
+     * Syncs followed channels:
+     * - Uses 15-minute smart cache TTL: skips network requests for any channel synced within 15 minutes unless [force] is true.
+     * - Uses fast lightweight YouTube Atom RSS feed (~150ms per channel) with graceful yt-dlp fallback.
+     * - Uses bounded concurrency (Semaphore of 3) to execute in parallel while strictly preventing rate limits.
+     * - Updates SQLite last_sync_at per channel and global sync timestamps.
      */
-    fun syncFollowedChannels() {
+    fun syncFollowedChannels(force: Boolean = false) {
+        if (_uiState.value.isSyncingChannels) return
+
         viewModelScope.launch {
             val channels = databaseManager.getFollowedChannels()
             if (channels.isEmpty()) return@launch
 
-            _uiState.update { it.copy(isSyncingChannels = true) }
-            addLog("Checking updates for ${channels.size} followed channels...")
+            val now = System.currentTimeMillis()
+            val ttlMillis = 15 * 60 * 1000L // 15-minute smart cache TTL
 
-            for (ch in channels) {
-                // Ensure avatar is cached
-                if (ch.avatarBase64.isBlank() && ch.avatarUrl.isNotBlank()) {
-                    val base64 = AvatarManager.downloadAvatarAsBase64(ch.avatarUrl)
-                    if (!base64.isNullOrBlank()) {
-                        databaseManager.updateChannelAvatarBase64(ch.id, base64)
+            val channelsToSync = if (force) {
+                channels
+            } else {
+                channels.filter { (now - it.lastSyncAt) > ttlMillis }
+            }
+
+            if (channelsToSync.isEmpty()) {
+                addLog("All ${channels.size} followed channels are fresh within TTL (15m). Skipping network sync.")
+                return@launch
+            }
+
+            _uiState.update { it.copy(isSyncingChannels = true) }
+            addLog("Checking updates for ${channelsToSync.size} followed channels (parallel RSS)...")
+
+            val semaphore = Semaphore(3)
+
+            withContext(ResonDispatchers.Network) {
+                val jobs = channelsToSync.map { ch ->
+                    async {
+                        semaphore.withPermit {
+                            // Ensure avatar is cached
+                            if (ch.avatarBase64.isBlank() && ch.avatarUrl.isNotBlank()) {
+                                val base64 = AvatarManager.downloadAvatarAsBase64(ch.avatarUrl)
+                                if (!base64.isNullOrBlank()) {
+                                    databaseManager.updateChannelAvatarBase64(ch.id, base64)
+                                }
+                            }
+
+                            // 1. Attempt ultra-fast lightweight RSS fetch (~150ms)
+                            var videos: List<Video>? = null
+                            if (!YouTubeRssFetcher.isRateLimited() && ch.id.startsWith("UC")) {
+                                val rssResult = YouTubeRssFetcher.fetchChannelVideos(ch.id, ch.title)
+                                if (rssResult is Result.Success && rssResult.data.isNotEmpty()) {
+                                    videos = rssResult.data
+                                }
+                            }
+
+                            // 2. Fallback to yt-dlp if RSS was empty or failed
+                            if (videos.isNullOrEmpty()) {
+                                val ytResult = ytDlpManager.fetchChannelVideos(
+                                    channelId = ch.id,
+                                    handle = ch.handle,
+                                    channelTitle = ch.title,
+                                    maxResults = 20
+                                )
+                                if (ytResult is Result.Success) {
+                                    videos = ytResult.data
+                                }
+                            }
+
+                            if (!videos.isNullOrEmpty()) {
+                                databaseManager.upsertVideos(videos, defaultChannelId = ch.id)
+                            }
+                            databaseManager.updateChannelLastSyncTime(ch.id, System.currentTimeMillis())
+
+                            // Polite 40ms inter-channel delay to avoid burst patterns
+                            delay(40)
+                        }
                     }
                 }
-
-                // Check for new uploads (up to 20 to capture all uploads within the month)
-                val result = ytDlpManager.fetchChannelVideos(
-                    channelId = ch.id,
-                    handle = ch.handle,
-                    channelTitle = ch.title,
-                    maxResults = 20
-                )
-                if (result is Result.Success && result.data.isNotEmpty()) {
-                    databaseManager.upsertVideos(result.data, defaultChannelId = ch.id)
-                }
+                jobs.awaitAll()
             }
 
             // Also replenish discovery recommendations based on followed channels
-            replenishDiscoveryFeedIfNeeded(force = true)
+            replenishDiscoveryFeedIfNeeded(force = force)
 
-            _uiState.update { it.copy(isSyncingChannels = false) }
-            addLog("Channels sync completed.")
+            val finishedTime = System.currentTimeMillis()
+            userPreferences.updateLastChannelsSyncTime(finishedTime)
+            userPreferences.updateLastFeedSyncTime(finishedTime)
+
+            _uiState.update {
+                it.copy(
+                    isSyncingChannels = false,
+                    lastChannelsSyncedAt = finishedTime,
+                    lastFeedSyncedAt = finishedTime
+                )
+            }
+            addLog("Channels sync completed for ${channelsToSync.size} channels.")
         }
     }
 
@@ -1054,25 +1134,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshChannelsSection() {
         val selectedId = _uiState.value.selectedChannelId
         if (selectedId == null) {
-            syncFollowedChannels()
+            syncFollowedChannels(force = true)
         } else {
             viewModelScope.launch {
                 _uiState.update { it.copy(isSyncingChannels = true) }
                 val ch = _uiState.value.followedChannelList.find { it.id == selectedId }
                     ?: databaseManager.getFollowedChannels().find { it.id == selectedId }
-                val result = withContext(ResonDispatchers.Network) {
-                    ytDlpManager.fetchChannelVideos(
-                        channelId = selectedId,
-                        handle = ch?.handle.orEmpty(),
-                        channelTitle = ch?.title.orEmpty(),
-                        startIndex = 1,
-                        maxResults = PAGE_SIZE
-                    )
+
+                // Try fast RSS first (~150ms), fallback to yt-dlp
+                var newVideos: List<Video>? = null
+                if (!YouTubeRssFetcher.isRateLimited() && selectedId.startsWith("UC")) {
+                    val rssResult = YouTubeRssFetcher.fetchChannelVideos(selectedId, ch?.title.orEmpty())
+                    if (rssResult is Result.Success && rssResult.data.isNotEmpty()) {
+                        newVideos = rssResult.data
+                    }
                 }
-                if (result is Result.Success && result.data.isNotEmpty()) {
-                    databaseManager.upsertVideos(result.data, defaultChannelId = selectedId)
+
+                if (newVideos.isNullOrEmpty()) {
+                    val result = withContext(ResonDispatchers.Network) {
+                        ytDlpManager.fetchChannelVideos(
+                            channelId = selectedId,
+                            handle = ch?.handle.orEmpty(),
+                            channelTitle = ch?.title.orEmpty(),
+                            startIndex = 1,
+                            maxResults = PAGE_SIZE
+                        )
+                    }
+                    if (result is Result.Success) {
+                        newVideos = result.data
+                    }
+                }
+
+                if (!newVideos.isNullOrEmpty()) {
+                    databaseManager.upsertVideos(newVideos, defaultChannelId = selectedId)
+                    databaseManager.updateChannelLastSyncTime(selectedId, System.currentTimeMillis())
                     val updated = databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = 0)
-                    _uiState.update { it.copy(channelVideos = updated, canLoadMoreChannelVideos = updated.size >= PAGE_SIZE) }
+                    val now = System.currentTimeMillis()
+                    userPreferences.updateLastChannelsSyncTime(now)
+                    _uiState.update {
+                        it.copy(
+                            channelVideos = updated,
+                            canLoadMoreChannelVideos = updated.size >= PAGE_SIZE,
+                            lastChannelsSyncedAt = now
+                        )
+                    }
                 }
                 _uiState.update { it.copy(isSyncingChannels = false) }
             }

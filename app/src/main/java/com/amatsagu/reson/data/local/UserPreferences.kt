@@ -59,6 +59,26 @@ class UserPreferences private constructor(context: Context) {
     )
     val totalListeningTimeMs: StateFlow<Long> = _totalListeningTimeMs.asStateFlow()
 
+    private val _lastFeedSyncTime = MutableStateFlow(
+        prefs.getLong(KEY_LAST_FEED_SYNC_TIME, 0L)
+    )
+    val lastFeedSyncTime: StateFlow<Long> = _lastFeedSyncTime.asStateFlow()
+
+    private val _lastChannelsSyncTime = MutableStateFlow(
+        prefs.getLong(KEY_LAST_CHANNELS_SYNC_TIME, 0L)
+    )
+    val lastChannelsSyncTime: StateFlow<Long> = _lastChannelsSyncTime.asStateFlow()
+
+    fun updateLastFeedSyncTime(time: Long = System.currentTimeMillis()) {
+        prefs.edit().putLong(KEY_LAST_FEED_SYNC_TIME, time).apply()
+        _lastFeedSyncTime.value = time
+    }
+
+    fun updateLastChannelsSyncTime(time: Long = System.currentTimeMillis()) {
+        prefs.edit().putLong(KEY_LAST_CHANNELS_SYNC_TIME, time).apply()
+        _lastChannelsSyncTime.value = time
+    }
+
     fun setThemeColor(color: ThemeColor) {
         _themeColor.value = color
         prefs.edit().putString(KEY_THEME_COLOR, color.id).apply()
@@ -100,6 +120,8 @@ class UserPreferences private constructor(context: Context) {
         private const val KEY_SHOW_RECOMMENDED = "pref_show_recommended"
         private const val KEY_LANGUAGE = "pref_language"
         private const val KEY_TOTAL_LISTENING_MS = "pref_total_listening_ms"
+        private const val KEY_LAST_FEED_SYNC_TIME = "pref_last_feed_sync_time"
+        private const val KEY_LAST_CHANNELS_SYNC_TIME = "pref_last_channels_sync_time"
 
         @Volatile
         private var instance: UserPreferences? = null

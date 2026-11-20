@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -186,6 +187,7 @@ fun ResonApp(viewModel: MainViewModel) {
                             onRefresh = { viewModel.refreshChannelsSection() },
                             queuedDownloadIds = uiState.queuedDownloadIds,
                             downloadingProgressMap = uiState.downloadingProgressMap,
+                            lastChannelsSyncedAt = uiState.lastChannelsSyncedAt,
                             contentPadding = innerPadding
                         )
                     }
@@ -317,6 +319,15 @@ fun FeedScreen(
             )
         }
 
+        if (uiState.isFeedRefreshing || uiState.isSyncingChannels) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
         PullToRefreshBox(
             isRefreshing = uiState.isFeedRefreshing,
             onRefresh = onRefresh,
@@ -364,11 +375,27 @@ fun FeedScreen(
 
                     if (showRecommended && uiState.feedVideos.isNotEmpty()) {
                         item(key = "recommended_header", contentType = "header") {
-                            AdaptiveSectionHeader(
-                                fullTitle = stringResource(R.string.section_recommended_content),
-                                shortTitle = stringResource(R.string.section_recommended_short),
-                                modifier = Modifier.padding(horizontal = 16.dp)
+                            val syncText = rememberFormattedLastSynced(
+                                timestamp = uiState.lastFeedSyncedAt,
+                                isSyncing = uiState.isFeedRefreshing || uiState.isSyncingChannels
                             )
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                            ) {
+                                AdaptiveSectionHeader(
+                                    fullTitle = stringResource(R.string.section_recommended_content),
+                                    shortTitle = stringResource(R.string.section_recommended_short)
+                                )
+                                Text(
+                                    text = syncText,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                                )
+                            }
                         }
 
                         items(
@@ -548,6 +575,7 @@ fun ChannelsScreen(
     contentPadding: PaddingValues,
     queuedDownloadIds: Set<String> = emptySet(),
     downloadingProgressMap: Map<String, Float> = emptyMap(),
+    lastChannelsSyncedAt: Long = 0L,
 ) {
     val listState = rememberLazyListState()
 
@@ -572,7 +600,17 @@ fun ChannelsScreen(
             .fillMaxSize()
             .padding(contentPadding)
     ) {
-        if (followedChannels.isEmpty()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (isSyncing) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            if (followedChannels.isEmpty()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -624,121 +662,120 @@ fun ChannelsScreen(
                 contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-            if (isSyncing) {
-                item(key = "channels_syncing_indicator") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.CenterEnd
+                // Top Horizontal Swipeable Channels Carousel
+                item(key = "channels_carousel") {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(
-                            text = stringResource(R.string.channels_syncing),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Medium
-                        )
+                        item(key = "all_channels") {
+                            AllChannelsCard(
+                                isSelected = selectedChannelId == null,
+                                onClick = { onSelectChannel(null) }
+                            )
+                        }
+
+                        items(
+                            items = followedChannels,
+                            key = { it.id }
+                        ) { channel ->
+                            ChannelAvatarCard(
+                                channel = channel,
+                                isSelected = selectedChannelId == channel.id,
+                                onClick = {
+                                    onSelectChannel(if (selectedChannelId == channel.id) null else channel.id)
+                                }
+                            )
+                        }
                     }
                 }
-            }
 
-            // Top Horizontal Swipeable Channels Carousel
-            item(key = "channels_carousel") {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    item(key = "all_channels") {
-                        AllChannelsCard(
-                            isSelected = selectedChannelId == null,
-                            onClick = { onSelectChannel(null) }
-                        )
+                // Section Header for Videos
+                item(key = "recent_videos_header") {
+                    val selectedChannel = followedChannels.find { it.id == selectedChannelId }
+                    val (fullHeader, shortHeader) = if (selectedChannel != null) {
+                        selectedChannel.title to selectedChannel.title
+                    } else {
+                        stringResource(R.string.channels_recent_videos) to stringResource(R.string.channels_recent_short)
                     }
-
-                    items(
-                        items = followedChannels,
-                        key = { it.id }
-                    ) { channel ->
-                        ChannelAvatarCard(
-                            channel = channel,
-                            isSelected = selectedChannelId == channel.id,
-                            onClick = {
-                                onSelectChannel(if (selectedChannelId == channel.id) null else channel.id)
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Section Header for Videos
-            item(key = "recent_videos_header") {
-                val selectedChannel = followedChannels.find { it.id == selectedChannelId }
-                val (fullHeader, shortHeader) = if (selectedChannel != null) {
-                    selectedChannel.title to selectedChannel.title
-                } else {
-                    stringResource(R.string.channels_recent_videos) to stringResource(R.string.channels_recent_short)
-                }
-
-                AdaptiveSectionHeader(
-                    fullTitle = fullHeader,
-                    shortTitle = shortHeader,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-            }
-
-            // Recent Uploads List (max 5 per channel when in "All" view)
-            if (videos.isEmpty()) {
-                item(key = "no_videos_placeholder") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isSyncing) stringResource(R.string.channels_syncing) else stringResource(R.string.channels_no_videos),
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            } else {
-                items(
-                    items = videos,
-                    key = { it.id },
-                    contentType = { "channel_video" }
-                ) { video ->
-                    val isPlaying = video.id == currentPlayingVideoId && isPlaybackActive
-                    val isBuffering = video.id == currentPlayingVideoId && isAudioBuffering
-                    val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
-                    val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
-                    VideoItem(
-                        video = video,
-                        isPlaying = isPlaying,
-                        isBuffering = isBuffering,
-                        isQueued = isQueued,
-                        downloadProgress = activeProgress,
-                        onPlayClick = { onPlayVideo(video) },
-                        onDownloadClick = { onDownloadVideo(video) },
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                    val syncText = rememberFormattedLastSynced(
+                        timestamp = lastChannelsSyncedAt,
+                        isSyncing = isSyncing
                     )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        AdaptiveSectionHeader(
+                            fullTitle = fullHeader,
+                            shortTitle = shortHeader
+                        )
+                        Text(
+                            text = syncText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                        )
+                    }
                 }
 
-                if (isChannelLoadingMore) {
-                    item(key = "channel_loading_more_indicator", contentType = "loading_spinner") {
+                // Recent Uploads List (max 5 per channel when in "All" view)
+                if (videos.isEmpty()) {
+                    item(key = "no_videos_placeholder") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 16.dp),
+                                .padding(horizontal = 24.dp, vertical = 32.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(28.dp),
-                                strokeWidth = 2.5.dp,
-                                color = MaterialTheme.colorScheme.primary
+                            Text(
+                                text = if (isSyncing) stringResource(R.string.channels_syncing) else stringResource(R.string.channels_no_videos),
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
                             )
+                        }
+                    }
+                } else {
+                    items(
+                        items = videos,
+                        key = { it.id },
+                        contentType = { "channel_video" }
+                    ) { video ->
+                        val isPlaying = video.id == currentPlayingVideoId && isPlaybackActive
+                        val isBuffering = video.id == currentPlayingVideoId && isAudioBuffering
+                        val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                        val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
+                        VideoItem(
+                            video = video,
+                            isPlaying = isPlaying,
+                            isBuffering = isBuffering,
+                            isQueued = isQueued,
+                            downloadProgress = activeProgress,
+                            onPlayClick = { onPlayVideo(video) },
+                            onDownloadClick = { onDownloadVideo(video) },
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
+
+                    if (isChannelLoadingMore) {
+                        item(key = "channel_loading_more_indicator", contentType = "loading_spinner") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 2.5.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -746,6 +783,43 @@ fun ChannelsScreen(
         }
     }
 }
+}
+
+fun formatLastSyncedText(
+    timestamp: Long,
+    isSyncing: Boolean,
+    context: android.content.Context
+): String {
+    if (isSyncing) {
+        return context.getString(R.string.status_syncing_in_progress)
+    }
+    if (timestamp <= 0L) {
+        return context.getString(R.string.status_not_synced_yet)
+    }
+    val diffSeconds = ((System.currentTimeMillis() - timestamp) / 1000L).coerceAtLeast(0L)
+    return when {
+        diffSeconds < 60L -> context.getString(R.string.status_updated_just_now)
+        diffSeconds < 3600L -> {
+            val minutes = (diffSeconds / 60L).toInt().coerceAtLeast(1)
+            context.getString(R.string.status_updated_minutes_ago, minutes)
+        }
+        diffSeconds < 86400L -> {
+            val hours = (diffSeconds / 3600L).toInt().coerceAtLeast(1)
+            context.getString(R.string.status_updated_hours_ago, hours)
+        }
+        else -> {
+            val days = (diffSeconds / 86400L).toInt().coerceAtLeast(1)
+            context.getString(R.string.status_updated_days_ago, days)
+        }
+    }
+}
+
+@Composable
+fun rememberFormattedLastSynced(timestamp: Long, isSyncing: Boolean): String {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(timestamp, isSyncing) {
+        formatLastSyncedText(timestamp, isSyncing, context)
+    }
 }
 
 
