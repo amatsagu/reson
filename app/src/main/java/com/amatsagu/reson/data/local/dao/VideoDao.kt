@@ -133,15 +133,32 @@ class VideoDao {
         return videos
     }
 
-    fun getDownloadedVideos(db: SQLiteDatabase): List<Video> {
+    fun getDownloadedVideos(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
         val videos = mutableListOf<Video>()
-        val query = "SELECT * FROM videos WHERE is_downloaded = 1 ORDER BY last_played_at DESC, created_at DESC"
-        db.rawQuery(query, null).use { cursor ->
+        val query = "SELECT * FROM videos WHERE is_downloaded = 1 ORDER BY last_played_at DESC, created_at DESC LIMIT ? OFFSET ?"
+        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 videos.add(cursorToVideo(cursor))
             }
         }
         return videos
+    }
+
+    fun getPlaybackHistory(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
+        val videos = mutableListOf<Video>()
+        val query = "SELECT * FROM videos WHERE last_played_at > 0 ORDER BY last_played_at DESC LIMIT ? OFFSET ?"
+        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
+            while (cursor.moveToNext()) {
+                videos.add(cursorToVideo(cursor))
+            }
+        }
+        return videos
+    }
+
+    fun clearPlaybackHistory(db: SQLiteDatabase): Boolean {
+        val query = "UPDATE videos SET last_played_at = 0, playback_position_ms = 0, playback_progress = 0.0 WHERE last_played_at > 0"
+        db.execSQL(query)
+        return true
     }
 
     fun updatePlaybackProgress(

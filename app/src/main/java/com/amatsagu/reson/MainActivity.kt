@@ -61,6 +61,7 @@ import com.amatsagu.reson.ui.components.ResonUnifiedBottomBar
 import com.amatsagu.reson.ui.components.SearchOverlay
 import com.amatsagu.reson.ui.components.SearchPillBar
 import com.amatsagu.reson.ui.components.VideoItem
+import com.amatsagu.reson.ui.screens.LibraryScreen
 import com.amatsagu.reson.ui.screens.SettingsScreen
 import com.amatsagu.reson.ui.theme.ResonTheme
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -162,9 +163,14 @@ fun ResonApp(viewModel: MainViewModel) {
                     }
                     ResonTab.Library -> {
                         LibraryScreen(
-                            ytDlpState = ytDlpState,
-                            onCheckUpdate = { viewModel.checkUpdate() },
-                            onSelfRepair = { viewModel.selfRepair() },
+                            historyVideos = uiState.historyVideos,
+                            downloadedVideos = uiState.downloadedVideos,
+                            currentPlayingVideoId = uiState.currentPlayingVideo?.id,
+                            isPlaying = uiState.isPlaying,
+                            isAudioBuffering = uiState.isAudioBuffering,
+                            onPlayVideo = { viewModel.playVideo(it) },
+                            onDownloadVideo = { viewModel.downloadVideo(it) },
+                            onClearHistory = { viewModel.clearPlaybackHistory() },
                             contentPadding = innerPadding
                         )
                     }
@@ -685,70 +691,7 @@ fun ChannelsScreen(
     }
 }
 
-@Composable
-fun LibraryScreen(
-    ytDlpState: YtDlpState,
-    onCheckUpdate: () -> Unit,
-    onSelfRepair: () -> Unit,
-    contentPadding: PaddingValues
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(contentPadding)
-            .padding(16.dp)
-    ) {
-        Text(
-            text = stringResource(R.string.library_title),
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = stringResource(R.string.library_engine_status),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                val statusText = when (ytDlpState) {
-                    is YtDlpState.Ready -> stringResource(R.string.status_ready, ytDlpState.version)
-                    is YtDlpState.Updating -> stringResource(R.string.status_updating)
-                    is YtDlpState.Initializing -> stringResource(R.string.status_initializing)
-                    is YtDlpState.Error -> stringResource(R.string.status_error, ytDlpState.message)
-                    is YtDlpState.Uninitialized -> stringResource(R.string.status_uninitialized)
-                }
-
-                Text(
-                    text = statusText,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onCheckUpdate) {
-                        Text(stringResource(R.string.action_check_update))
-                    }
-                    OutlinedButton(onClick = onSelfRepair) {
-                        Text(stringResource(R.string.action_self_repair))
-                    }
-                }
-            }
-        }
-    }
-}
 
 @androidx.compose.ui.tooling.preview.Preview(name = "Empty Feed (Fresh Start)", showBackground = true)
 @Composable

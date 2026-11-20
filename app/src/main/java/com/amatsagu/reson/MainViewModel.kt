@@ -68,6 +68,10 @@ data class MainUiState(
     val continueVideos: List<Video> = emptyList(),
     val feedVideos: List<Video> = emptyList(),
 
+    // Library Content
+    val historyVideos: List<Video> = emptyList(),
+    val downloadedVideos: List<Video> = emptyList(),
+
     // Pagination & Infinite Scroll states
     val isFeedLoadingMore: Boolean = false,
     val canLoadMoreFeed: Boolean = true,
@@ -305,6 +309,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         feedVideos = current.feedVideos.filterNot { it.id in continueIds }
                     )
                 }
+            }
+        }
+
+        // Observe listening history
+        viewModelScope.launch {
+            databaseManager.observePlaybackHistory().collect { videos ->
+                _uiState.update { it.copy(historyVideos = videos) }
+            }
+        }
+
+        // Observe locally downloaded videos
+        viewModelScope.launch {
+            databaseManager.observeDownloadedVideos().collect { videos ->
+                _uiState.update { it.copy(downloadedVideos = videos) }
             }
         }
 
@@ -914,19 +932,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun downloadVideo(video: Video) {
-        addLog("Download requested for: ${video.title}")
-        _uiState.update { current ->
-            val updatedFeed = current.feedVideos.map {
-                if (it.id == video.id) it.copy(downloadProgress = 0.5f) else it
-            }
-            val updatedSearch = current.searchResults.map { item ->
-                if (item is SearchResultItem.Video && item.video.id == video.id) {
-                    SearchResultItem.Video(item.video.copy(downloadProgress = 0.5f))
-                } else {
-                    item
-                }
-            }
-            current.copy(feedVideos = updatedFeed, searchResults = updatedSearch)
+        viewModelScope.launch(ResonDispatchers.Database) {
+            val newStatus = !video.isDownloaded
+            val filePath = if (newStatus) "offline_${video.id}.mp3" else null
+            databaseManager.upsertVideo(video.copy(isDownloaded = newStatus))
+            databaseManager.updateDownloadStatus(video.id, newStatus, filePath)
+            addLog("Toggled download status for ${video.title}: isDownloaded=$newStatus")
+            refreshDatabaseStats()
+        }
+    }
+
+    fun clearPlaybackHistory() {
+        viewModelScope.launch(ResonDispatchers.Database) {
+            databaseManager.clearPlaybackHistory()
+            addLog("Cleared listening history.")
         }
     }
 

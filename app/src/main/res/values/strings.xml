@@ -66,8 +66,19 @@
     <string name="channels_syncing">Syncing latest videos…</string>
 
     <!-- Library Screen -->
-    <string name="library_title">Library &amp; Maintenance</string>
-    <string name="library_engine_status">System Status</string>
+    <string name="library_title">Library</string>
+    <string name="library_history_title">Listening History</string>
+    <string name="library_history_empty_title">No listening history yet</string>
+    <string name="library_history_empty_desc">Episodes you play will appear here so you can easily jump back in anytime.</string>
+    <string name="library_downloads_title">Offline Videos</string>
+    <string name="library_downloads_empty_title">No offline videos</string>
+    <string name="library_downloads_empty_desc">Save content to your device to enjoy seamless listening even without an internet connection.</string>
+    <string name="library_see_all">See all</string>
+    <string name="library_view_entire_history">View entire history (%1$d)</string>
+    <string name="library_view_all_downloads">View all offline (%1$d)</string>
+    <string name="library_clear_history">Clear History</string>
+    <string name="library_clear_history_confirm_title">Clear Listening History?</string>
+    <string name="library_clear_history_confirm_desc">This will reset your playback progress on all previously played videos. Continue?</string>
 
     <!-- General Placeholders -->
     <string name="placeholder_untitled">Untitled</string>
@@ -87,6 +98,7 @@
     <string name="settings_engine_version">Media Engine</string>
     <string name="settings_cache_version">Data Format</string>
     <string name="settings_downloaded_count">Downloaded Locally</string>
+    <string name="settings_cache_size">Cache size</string>
     <string name="settings_total_listening_time">Total Listening Time</string>
     <string name="settings_self_repair_title">Self-Repair System</string>
     <string name="settings_self_repair_desc">This will verify media components and restore local data integrity to fix unexpected playback or syncing issues. Continue?</string>

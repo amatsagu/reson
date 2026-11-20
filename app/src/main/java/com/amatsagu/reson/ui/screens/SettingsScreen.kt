@@ -71,6 +71,7 @@ import com.amatsagu.reson.data.local.DatabaseStats
 import com.amatsagu.reson.data.local.ThemeColor
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.Locale
 
 /**
  * Settings Screen with 3 dedicated sections:
@@ -204,6 +205,15 @@ fun SettingsScreen(
                 DetailRow(
                     label = stringResource(R.string.settings_downloaded_count),
                     value = "$downloadedCount videos"
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Cache size (sqlite data size + all downloaded locally files)
+                val totalCacheBytes = databaseStats?.totalCacheSizeBytes ?: 0L
+                DetailRow(
+                    label = stringResource(R.string.settings_cache_size),
+                    value = formatFileSize(totalCacheBytes)
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -723,5 +733,19 @@ private fun formatListeningTime(totalMs: Long): String {
         hours > 0 -> "${hours}h ${minutes}m"
         minutes > 0 -> "${minutes}m ${seconds}s"
         else -> "${seconds}s"
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val kilo = 1024.0
+    val mega = kilo * 1024.0
+    val giga = mega * 1024.0
+
+    return when {
+        bytes >= giga -> String.format(Locale.US, "%.2f GB", bytes / giga)
+        bytes >= mega -> String.format(Locale.US, "%.1f MB", bytes / mega)
+        bytes >= kilo -> String.format(Locale.US, "%.1f KB", bytes / kilo)
+        else -> "$bytes B"
     }
 }

@@ -29,6 +29,7 @@ data class DatabaseStats(
     val continueListeningCount: Long,
     val downloadedVideoCount: Long,
     val databaseSizeBytes: Long,
+    val totalCacheSizeBytes: Long = databaseSizeBytes,
 )
 
 /**
@@ -305,19 +306,54 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Gets all downloaded videos.
      */
-    suspend fun getDownloadedVideos(): List<Video> = withContext(dispatcher) {
+    suspend fun getDownloadedVideos(limit: Int = 100, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
-        videoDao.getDownloadedVideos(db)
+        videoDao.getDownloadedVideos(db, limit, offset)
     }
 
     /**
      * Reactive Flow observing downloaded videos.
      */
-    fun observeDownloadedVideos(): Flow<List<Video>> = flow {
+    fun observeDownloadedVideos(limit: Int = 100): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
-            emit(getDownloadedVideos())
+            emit(getDownloadedVideos(limit, offset = 0))
         }
     }.flowOn(dispatcher)
+
+    /* -------------------------------------------------------------------------
+     * History API
+     * ------------------------------------------------------------------------- */
+
+    /**
+     * Gets listening history videos ordered by lastPlayedAt DESC.
+     */
+    suspend fun getPlaybackHistory(limit: Int = 100, offset: Int = 0): List<Video> = withContext(dispatcher) {
+        val db = dbHelper.readableDatabase
+        videoDao.getPlaybackHistory(db, limit, offset)
+    }
+
+    /**
+     * Reactive Flow observing listening history videos.
+     */
+    fun observePlaybackHistory(limit: Int = 100): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getPlaybackHistory(limit, offset = 0))
+        }
+    }.flowOn(dispatcher)
+
+    /**
+     * Clears all playback history.
+     */
+    suspend fun clearPlaybackHistory(): Boolean = withContext(dispatcher) {
+        val success = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.clearPlaybackHistory(db)
+        }
+        if (success) {
+            notifyVideoChanged()
+        }
+        success
+    }
 
     /* -------------------------------------------------------------------------
      * Maintenance & Diagnostics
@@ -332,15 +368,43 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val videos = videoDao.countVideos(db)
         val continueCount = videoDao.getContinueListeningVideos(db, 100).size.toLong()
         val downloaded = videoDao.countDownloaded(db)
+        // SQLite DB files size (including WAL and SHM if present)
         val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
-        val sizeBytes = if (dbFile.exists()) dbFile.length() else 0L
+        val dbDir = dbFile.parentFile
+        val dbFilesSize = if (dbDir != null && dbDir.exists()) {
+            dbDir.listFiles()?.filter { it.name.startsWith(ResonDatabaseHelper.DATABASE_NAME) }?.sumOf { it.length() }
+                ?: (if (dbFile.exists()) dbFile.length() else 0L)
+        } else {
+            if (dbFile.exists()) dbFile.length() else 0L
+        }
+
+        // Locally downloaded files size
+        var downloadedFilesSize = 0L
+        val downloadsDir = File(appContext.filesDir, "downloads")
+        if (downloadsDir.exists()) {
+            downloadedFilesSize += downloadsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+        appContext.filesDir.listFiles()?.filter {
+            it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a"))
+        }?.forEach {
+            downloadedFilesSize += it.length()
+        }
+        appContext.getExternalFilesDir(null)?.let { extDir ->
+            val extDownloads = File(extDir, "downloads")
+            if (extDownloads.exists()) {
+                downloadedFilesSize += extDownloads.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            }
+        }
+
+        val totalCacheSize = dbFilesSize + downloadedFilesSize
 
         DatabaseStats(
             followedChannelCount = channels,
             totalVideoCount = videos,
             continueListeningCount = continueCount,
             downloadedVideoCount = downloaded,
-            databaseSizeBytes = sizeBytes,
+            databaseSizeBytes = dbFilesSize,
+            totalCacheSizeBytes = totalCacheSize,
         )
     }
 
