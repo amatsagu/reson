@@ -92,13 +92,12 @@ fun ResonApp(viewModel: MainViewModel) {
             modifier = Modifier.fillMaxSize(),
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                val playbackState by viewModel.audioPlaybackState.collectAsStateWithLifecycle()
                 ResonUnifiedBottomBar(
                     currentVideo = uiState.currentPlayingVideo,
                     isPlaying = uiState.isPlaying,
                     isBuffering = uiState.isAudioBuffering,
-                    positionMs = playbackState.currentPositionMs,
-                    durationMs = if (playbackState.durationMs > 0) playbackState.durationMs else uiState.playbackDurationMs,
+                    positionMs = { viewModel.getCurrentPlaybackPositionMs() },
+                    durationMs = uiState.playbackDurationMs,
                     onPlayPauseClick = { viewModel.togglePlayPause() },
                     onSeek = { viewModel.seekTo(it) },
                     onCloseClick = { viewModel.closePlayer() },
@@ -295,15 +294,14 @@ fun FeedScreen(
                     ) { video ->
                         val isPlaying = video.id == uiState.currentPlayingVideo?.id && uiState.isPlaying
                         val isBuffering = video.id == uiState.currentPlayingVideo?.id && uiState.isAudioBuffering
-                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                            VideoItem(
-                                video = video,
-                                isPlaying = isPlaying,
-                                isBuffering = isBuffering,
-                                onPlayClick = { onPlayVideo(video) },
-                                onDownloadClick = { onDownloadVideo(video) }
-                            )
-                        }
+                        VideoItem(
+                            video = video,
+                            isPlaying = isPlaying,
+                            isBuffering = isBuffering,
+                            onPlayClick = { onPlayVideo(video) },
+                            onDownloadClick = { onDownloadVideo(video) },
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
                     }
 
                     if (isFeedLoadingMore) {
@@ -564,15 +562,14 @@ fun ChannelsScreen(
                 ) { video ->
                     val isPlaying = video.id == currentPlayingVideoId && isPlaybackActive
                     val isBuffering = video.id == currentPlayingVideoId && isAudioBuffering
-                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
-                        VideoItem(
-                            video = video,
-                            isPlaying = isPlaying,
-                            isBuffering = isBuffering,
-                            onPlayClick = { onPlayVideo(video) },
-                            onDownloadClick = { onDownloadVideo(video) }
-                        )
-                    }
+                    VideoItem(
+                        video = video,
+                        isPlaying = isPlaying,
+                        isBuffering = isBuffering,
+                        onPlayClick = { onPlayVideo(video) },
+                        onDownloadClick = { onDownloadVideo(video) },
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
                 }
 
                 if (isChannelLoadingMore) {

@@ -1,7 +1,7 @@
 package com.amatsagu.reson.data
 
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
+import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.io.BufferedReader
@@ -19,7 +19,7 @@ object SearchSuggestClient {
     private const val TAG = "Reson:Suggest"
     private const val BASE_URL = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q="
 
-    suspend fun getSuggestions(query: String): List<String> = withContext(Dispatchers.IO) {
+    suspend fun getSuggestions(query: String): List<String> = withContext(ResonDispatchers.Network) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext emptyList()
 

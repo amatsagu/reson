@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
  */
 class ResonApplication : Application(), ImageLoaderFactory {
 
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val applicationScope = CoroutineScope(SupervisorJob() + com.amatsagu.reson.core.coroutines.ResonDispatchers.SingleWorker)
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)

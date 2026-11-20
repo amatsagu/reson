@@ -150,6 +150,7 @@ class VideoDao {
         positionMs: Long,
         durationMs: Long,
         timestamp: Long = System.currentTimeMillis(),
+        trimHistory: Boolean = false,
     ): Boolean {
         val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
         val values = ContentValues().apply {
@@ -159,7 +160,7 @@ class VideoDao {
             put("last_played_at", timestamp)
         }
         val updated = db.update("videos", values, "id = ?", arrayOf(videoId)) > 0
-        if (updated) {
+        if (updated && trimHistory) {
             trimListeningHistory(db, 100)
         }
         return updated

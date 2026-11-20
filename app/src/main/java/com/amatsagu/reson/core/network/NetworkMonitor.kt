@@ -63,7 +63,7 @@ class NetworkMonitor private constructor(context: Context) {
     private val connectivityManager =
         context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + com.amatsagu.reson.core.coroutines.ResonDispatchers.SingleWorker)
 
     private val _networkState = MutableStateFlow(getCurrentInitialState())
     val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()

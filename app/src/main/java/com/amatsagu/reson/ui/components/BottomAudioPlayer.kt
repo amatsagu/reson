@@ -93,7 +93,7 @@ fun formatPlaybackTime(ms: Long): String {
  */
 @Composable
 fun InteractiveResonProgressBar(
-    progress: Float,
+    progress: () -> Float,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
     trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -101,9 +101,6 @@ fun InteractiveResonProgressBar(
 ) {
     var isDragging by remember { mutableStateOf(false) }
     var dragRatio by remember { mutableFloatStateOf(0f) }
-    val currentProgress by rememberUpdatedState(progress)
-
-    val displayRatio = if (isDragging) dragRatio else currentProgress
 
     Box(
         modifier = modifier
@@ -151,7 +148,8 @@ fun InteractiveResonProgressBar(
                         cornerRadius = cornerRadius
                     )
 
-                    // Active progress
+                    // Active progress - read directly in Draw phase to eliminate recompositions
+                    val displayRatio = if (isDragging) dragRatio else progress()
                     val clampedRatio = displayRatio.coerceIn(0f, 1f)
                     if (clampedRatio > 0f) {
                         drawRoundRect(
@@ -166,6 +164,59 @@ fun InteractiveResonProgressBar(
     )
 }
 
+@Composable
+fun InteractiveResonProgressBar(
+    progress: Float,
+    onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    progressColor: Color = MaterialTheme.colorScheme.primary,
+) {
+    InteractiveResonProgressBar(
+        progress = { progress },
+        onSeek = onSeek,
+        modifier = modifier,
+        trackColor = trackColor,
+        progressColor = progressColor
+    )
+}
+
+/**
+ * Isolated timestamp display to localize text recompositions strictly to once-per-second,
+ * keeping the outer player content and lazy lists completely static.
+ */
+@Composable
+fun PlaybackTimestamps(
+    positionMs: () -> Long,
+    durationMs: Long,
+    modifier: Modifier = Modifier,
+) {
+    val pos = positionMs()
+    val remainingMs = (durationMs - pos).coerceAtLeast(0L)
+    val remainingText = "-${formatPlaybackTime(remainingMs)}"
+    val currentPositionText = formatPlaybackTime(pos)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = currentPositionText,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = remainingText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 /**
  * Inner content of the Audio Player showing miniature, title, channel, play/pause with spinner,
  * close button, flat interactive seek bar (no thumb dot), and current/remaining timestamps.
@@ -175,7 +226,7 @@ fun BottomAudioPlayerContent(
     video: Video,
     isPlaying: Boolean,
     isBuffering: Boolean,
-    positionMs: Long,
+    positionMs: () -> Long,
     durationMs: Long,
     onPlayPauseClick: () -> Unit,
     onSeek: (Long) -> Unit,
@@ -186,14 +237,6 @@ fun BottomAudioPlayerContent(
     val effectiveDurationMs = remember(durationMs, video.durationSeconds) {
         if (durationMs > 0) durationMs else (video.durationSeconds * 1000L).coerceAtLeast(1000L)
     }
-
-    val currentRatio = remember(positionMs, effectiveDurationMs) {
-        if (effectiveDurationMs > 0) (positionMs.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f) else 0f
-    }
-
-    val remainingMs = (effectiveDurationMs - positionMs).coerceAtLeast(0L)
-    val remainingText = "-${formatPlaybackTime(remainingMs)}"
-    val currentPositionText = formatPlaybackTime(positionMs)
 
     Column(
         modifier = modifier
@@ -331,7 +374,9 @@ fun BottomAudioPlayerContent(
 
         // Interactive seek bar (no circle thumb dot)
         InteractiveResonProgressBar(
-            progress = currentRatio,
+            progress = {
+                if (effectiveDurationMs > 0) (positionMs().toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f) else 0f
+            },
             onSeek = { ratio ->
                 val targetMs = (ratio * effectiveDurationMs).toLong()
                 onSeek(targetMs)
@@ -340,25 +385,38 @@ fun BottomAudioPlayerContent(
         )
 
         // Time indicator bar (Current elapsed on left, remaining on right)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = currentPositionText,
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = remainingText,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        PlaybackTimestamps(
+            positionMs = positionMs,
+            durationMs = effectiveDurationMs
+        )
     }
+}
+
+@Composable
+fun BottomAudioPlayerContent(
+    video: Video,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    onPlayPauseClick: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onCloseClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    statusHint: String? = null,
+) {
+    BottomAudioPlayerContent(
+        video = video,
+        isPlaying = isPlaying,
+        isBuffering = isBuffering,
+        positionMs = { positionMs },
+        durationMs = durationMs,
+        onPlayPauseClick = onPlayPauseClick,
+        onSeek = onSeek,
+        onCloseClick = onCloseClick,
+        modifier = modifier,
+        statusHint = statusHint
+    )
 }
 
 /**
@@ -370,7 +428,7 @@ fun ResonUnifiedBottomBar(
     currentVideo: Video?,
     isPlaying: Boolean,
     isBuffering: Boolean,
-    positionMs: Long,
+    positionMs: () -> Long,
     durationMs: Long,
     onPlayPauseClick: () -> Unit,
     onSeek: (Long) -> Unit,

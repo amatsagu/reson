@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -398,8 +399,16 @@ class AudioPlayerManager(
         }
     }
 
+    private fun runOnMain(block: () -> Unit) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            block()
+        } else {
+            scope.launch { block() }
+        }
+    }
+
     fun pause() {
-        scope.launch {
+        runOnMain {
             if (exoPlayer.isPlaying) {
                 exoPlayer.pause()
             }
@@ -407,14 +416,16 @@ class AudioPlayerManager(
     }
 
     fun resume() {
-        scope.launch {
+        runOnMain {
             if (exoPlayer.playbackState == Player.STATE_IDLE || _playbackState.value.errorMessage != null) {
                 // If in error or idle, trigger self recovery
                 val video = _playbackState.value.currentVideo
                 if (video != null && onStreamRecoveryRequested != null) {
                     _playbackState.update { it.copy(isBuffering = true, errorMessage = null) }
-                    onStreamRecoveryRequested.invoke(video, _playbackState.value.currentPositionMs)
-                    return@launch
+                    scope.launch {
+                        onStreamRecoveryRequested.invoke(video, _playbackState.value.currentPositionMs)
+                    }
+                    return@runOnMain
                 }
             }
             if (!exoPlayer.isPlaying) {
@@ -424,7 +435,7 @@ class AudioPlayerManager(
     }
 
     fun togglePlayPause() {
-        scope.launch {
+        runOnMain {
             if (exoPlayer.isPlaying) {
                 pause()
             } else {
@@ -433,8 +444,10 @@ class AudioPlayerManager(
         }
     }
 
+    fun getCurrentPositionMs(): Long = _playbackState.value.currentPositionMs
+
     fun seekTo(positionMs: Long) {
-        scope.launch {
+        runOnMain {
             val safePos = positionMs.coerceAtLeast(0L)
             exoPlayer.seekTo(safePos)
             val duration = exoPlayer.duration.coerceAtLeast(0L)
@@ -450,7 +463,7 @@ class AudioPlayerManager(
     }
 
     fun stop() {
-        scope.launch {
+        runOnMain {
             saveCurrentProgress()
             isRecovering = false
             continuousBufferingMs = 0L
@@ -472,11 +485,10 @@ class AudioPlayerManager(
     }
 
     fun release() {
-        scope.launch {
-            stopProgressTicker()
-            exoPlayer.removeListener(playerListener)
-            exoPlayer.release()
-        }
+        stopProgressTicker()
+        exoPlayer.removeListener(playerListener)
+        exoPlayer.release()
+        scope.cancel()
     }
 
     private fun startProgressTicker() {

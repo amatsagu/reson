@@ -11,6 +11,7 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.YoutubeDLResponse
 import com.yausername.youtubedl_android.mapper.VideoInfo
 import com.yausername.ffmpeg.FFmpeg
+import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.SearchResultItem
 import com.amatsagu.reson.model.Video
@@ -126,7 +127,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
     val rateLimitStatus: StateFlow<RateLimitStatus> = _rateLimitStatus.asStateFlow()
 
     private val mutex = Mutex()
-    private val queueScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val networkDispatcher = ResonDispatchers.Network
+    private val queueScope = CoroutineScope(SupervisorJob() + networkDispatcher)
     private val priorityQueue = PriorityBlockingQueue<QueuedTask<*>>()
     private val wakeSignal = KChannel<Unit>(KChannel.CONFLATED)
     private val taskCounter = AtomicLong(0)
@@ -512,7 +514,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
      * Initializes yt-dlp and FFmpeg. If initialization fails (e.g., file corruption from an interrupted
      * write/update), it performs an automatic self-recovery by wiping the corrupted binaries and re-extracting.
      */
-    suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun initialize(): Boolean = withContext(networkDispatcher) {
         mutex.withLock {
             if (_state.value is YtDlpState.Ready) {
                 return@withContext true
@@ -549,7 +551,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
      */
     suspend fun performSelfRecovery(
         priority: TaskPriority = TaskPriority.IMMEDIATE
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(networkDispatcher) {
         executeQueued(priority, "SelfRecovery") {
             try {
                 Log.w(TAG, "Starting self-recovery: cleaning up binaries in filesDir...")
@@ -597,7 +599,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
     suspend fun update(
         channel: UpdateChannel = UpdateChannel.STABLE,
         priority: TaskPriority = TaskPriority.BACKGROUND
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(networkDispatcher) {
         executeQueued(priority, "Update:$channel") {
             mutex.withLock {
                 val currentVersion = getVersionName()
@@ -640,7 +642,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         url: String,
         autoRetryWithUpdate: Boolean = true,
         priority: TaskPriority = TaskPriority.INTERACTIVE
-    ): Result<VideoInfo> = withContext(Dispatchers.IO) {
+    ): Result<VideoInfo> = withContext(networkDispatcher) {
         executeQueued(priority, "Info:$url") {
             try {
                 ensureReady()
@@ -687,7 +689,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         forceRefresh: Boolean = false,
         priority: TaskPriority = TaskPriority.IMMEDIATE,
         autoRetryWithUpdate: Boolean = true
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(networkDispatcher) {
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
             val cached = streamCacheMutex.withLock { streamUrlCache[videoId] }
@@ -787,7 +789,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
     suspend fun executeRaw(
         request: YoutubeDLRequest,
         priority: TaskPriority = TaskPriority.INTERACTIVE
-    ): Result<YoutubeDLResponse> = withContext(Dispatchers.IO) {
+    ): Result<YoutubeDLResponse> = withContext(networkDispatcher) {
         executeQueued(priority, "Raw") {
             try {
                 ensureReady()
@@ -808,7 +810,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         maxResults: Int = 30,
         startIndex: Int = 1,
         priority: TaskPriority = TaskPriority.INTERACTIVE
-    ): Result<List<Video>> = withContext(Dispatchers.IO) {
+    ): Result<List<Video>> = withContext(networkDispatcher) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
 
@@ -921,7 +923,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         query: String,
         maxResults: Int = 3,
         priority: TaskPriority = TaskPriority.INTERACTIVE
-    ): Result<List<Channel>> = withContext(Dispatchers.IO) {
+    ): Result<List<Channel>> = withContext(networkDispatcher) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
 
@@ -1017,7 +1019,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         channelTitle: String = "",
         maxResults: Int = 5,
         priority: TaskPriority = TaskPriority.BACKGROUND
-    ): Result<List<Video>> = withContext(Dispatchers.IO) {
+    ): Result<List<Video>> = withContext(networkDispatcher) {
         val target = when {
             channelId.startsWith("UC") -> "https://www.youtube.com/channel/$channelId/videos"
             handle.isNotBlank() && handle.startsWith("@") -> "https://www.youtube.com/$handle/videos"

@@ -2,11 +2,11 @@ package com.amatsagu.reson.data.local
 
 import android.content.Context
 import android.util.Log
+import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import com.amatsagu.reson.data.local.dao.ChannelDao
 import com.amatsagu.reson.data.local.dao.VideoDao
 import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.Video
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
@@ -36,6 +36,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     private val channelDao = ChannelDao()
     private val videoDao = VideoDao()
     private val mutex = Mutex()
+    private val dispatcher = ResonDispatchers.Database
 
     // Invalidation triggers to notify reactive Flows when data mutations occur
     private val channelInvalidationTrigger = MutableSharedFlow<Unit>(replay = 1).apply {
@@ -53,7 +54,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
      * Follows a channel, inserting or updating its record with is_followed = 1.
      * Automatically notifies active observers.
      */
-    suspend fun followChannel(channel: Channel): Unit = withContext(Dispatchers.IO) {
+    suspend fun followChannel(channel: Channel): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
             channelDao.upsertChannel(db, channel, isFollowed = true)
@@ -66,7 +67,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Unfollows a channel (sets is_followed = 0).
      */
-    suspend fun unfollowChannel(channelId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun unfollowChannel(channelId: String): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
             val updated = channelDao.setFollowStatus(db, channelId, isFollowed = false)
@@ -83,7 +84,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Checks if a channel is currently followed.
      */
-    suspend fun isChannelFollowed(channelId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun isChannelFollowed(channelId: String): Boolean = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         channelDao.isChannelFollowed(db, channelId)
     }
@@ -91,7 +92,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Returns a snapshot of all currently followed channels sorted by follow time.
      */
-    suspend fun getFollowedChannels(): List<Channel> = withContext(Dispatchers.IO) {
+    suspend fun getFollowedChannels(): List<Channel> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         channelDao.getFollowedChannels(db)
     }
@@ -99,7 +100,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Returns a Set of followed channel IDs for fast O(1) membership checks.
      */
-    suspend fun getFollowedChannelIds(): Set<String> = withContext(Dispatchers.IO) {
+    suspend fun getFollowedChannelIds(): Set<String> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         channelDao.getFollowedChannelIds(db)
     }
@@ -107,7 +108,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Updates stored base64 image data for an offline cached channel avatar.
      */
-    suspend fun updateChannelAvatarBase64(channelId: String, avatarBase64: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun updateChannelAvatarBase64(channelId: String, avatarBase64: String): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
             val updated = channelDao.updateAvatarBase64(db, channelId, avatarBase64)
@@ -127,7 +128,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         channelInvalidationTrigger.collect {
             emit(getFollowedChannels())
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /**
      * Reactive Flow observing followed channel IDs set.
@@ -136,7 +137,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         channelInvalidationTrigger.collect {
             emit(getFollowedChannelIds())
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /* -------------------------------------------------------------------------
      * Videos / Feed API
@@ -145,7 +146,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Bulk inserts or updates videos in a single high-performance SQLite transaction.
      */
-    suspend fun upsertVideos(videos: List<Video>, defaultChannelId: String = ""): Unit = withContext(Dispatchers.IO) {
+    suspend fun upsertVideos(videos: List<Video>, defaultChannelId: String = ""): Unit = withContext(dispatcher) {
         if (videos.isEmpty()) return@withContext
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -158,7 +159,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Inserts or updates a single video.
      */
-    suspend fun upsertVideo(video: Video, channelId: String = ""): Unit = withContext(Dispatchers.IO) {
+    suspend fun upsertVideo(video: Video, channelId: String = ""): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
             videoDao.upsertVideo(db, video, channelId)
@@ -169,7 +170,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Fetches a video by its unique YouTube ID.
      */
-    suspend fun getVideoById(videoId: String): Video? = withContext(Dispatchers.IO) {
+    suspend fun getVideoById(videoId: String): Video? = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getVideoById(db, videoId)
     }
@@ -177,7 +178,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Gets recent videos from all followed channels with pagination support.
      */
-    suspend fun getFeedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getFeedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getFeedVideos(db, limit, offset)
     }
@@ -189,12 +190,12 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoInvalidationTrigger.collect {
             emit(getFeedVideos(limit, offset = 0))
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /**
      * Gets videos for a specific channel with pagination support.
      */
-    suspend fun getVideosForChannel(channelId: String, limit: Int = 30, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getVideosForChannel(channelId: String, limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getVideosForChannel(db, channelId, limit, offset)
     }
@@ -206,12 +207,12 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoInvalidationTrigger.collect {
             emit(getVideosForChannel(channelId, limit, offset = 0))
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /**
      * Gets recent uploads from followed channels, limited to maxPerChannel with pagination support.
      */
-    suspend fun getRecentVideosFromFollowed(maxPerChannel: Int = 5, limit: Int = 30, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getRecentVideosFromFollowed(maxPerChannel: Int = 5, limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel, limit, offset)
     }
@@ -223,7 +224,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoInvalidationTrigger.collect {
             emit(getRecentVideosFromFollowed(maxPerChannel, limit, offset = 0))
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /* -------------------------------------------------------------------------
      * Playback & Continue Listening API
@@ -236,12 +237,13 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoId: String,
         positionMs: Long,
         durationMs: Long,
-    ): Boolean = withContext(Dispatchers.IO) {
+        notify: Boolean = false,
+    ): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
-            videoDao.updatePlaybackProgress(db, videoId, positionMs, durationMs)
+            videoDao.updatePlaybackProgress(db, videoId, positionMs, durationMs, trimHistory = notify)
         }
-        if (success) {
+        if (success && notify) {
             notifyVideoChanged()
         }
         success
@@ -250,16 +252,16 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Marks a video as completed (progress = 1.0f) so it exits the continue listening list.
      */
-    suspend fun markVideoCompleted(videoId: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun markVideoCompleted(videoId: String): Boolean = withContext(dispatcher) {
         val video = getVideoById(videoId) ?: return@withContext false
         val durationMs = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
-        savePlaybackProgress(videoId, durationMs, durationMs)
+        savePlaybackProgress(videoId, durationMs, durationMs, notify = true)
     }
 
     /**
      * Fetches in-progress videos (< 98% complete) for the Continue section with pagination support.
      */
-    suspend fun getContinueListeningVideos(limit: Int = 10, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getContinueListeningVideos(limit: Int = 10, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getContinueListeningVideos(db, limit, offset)
     }
@@ -271,7 +273,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoInvalidationTrigger.collect {
             emit(getContinueListeningVideos(limit, offset = 0))
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /* -------------------------------------------------------------------------
      * Downloads API
@@ -284,7 +286,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoId: String,
         isDownloaded: Boolean,
         filePath: String? = null,
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
             videoDao.updateDownloadStatus(db, videoId, isDownloaded, filePath)
@@ -298,7 +300,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Gets all downloaded videos.
      */
-    suspend fun getDownloadedVideos(): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getDownloadedVideos(): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getDownloadedVideos(db)
     }
@@ -310,7 +312,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         videoInvalidationTrigger.collect {
             emit(getDownloadedVideos())
         }
-    }.flowOn(Dispatchers.IO)
+    }.flowOn(dispatcher)
 
     /* -------------------------------------------------------------------------
      * Maintenance & Diagnostics
@@ -319,7 +321,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Gathers high-level statistics about stored channels, videos, and database size.
      */
-    suspend fun getStats(): DatabaseStats = withContext(Dispatchers.IO) {
+    suspend fun getStats(): DatabaseStats = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         val channels = channelDao.countFollowed(db)
         val videos = videoDao.countVideos(db)
@@ -340,7 +342,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Clears all channels, videos, and search history tables.
      */
-    suspend fun clearAll(): Unit = withContext(Dispatchers.IO) {
+    suspend fun clearAll(): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
             db.beginTransaction()
