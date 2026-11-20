@@ -109,6 +109,7 @@ fun ResonApp(viewModel: MainViewModel) {
     val language by viewModel.language.collectAsStateWithLifecycle()
     val databaseStats by viewModel.databaseStats.collectAsStateWithLifecycle()
     val totalListeningTimeMs by viewModel.totalListeningTimeMs.collectAsStateWithLifecycle()
+    val playbackSpeed by viewModel.playbackSpeed.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -136,6 +137,8 @@ fun ResonApp(viewModel: MainViewModel) {
                         viewModel.selectTab(tab)
                     },
                     statusHint = uiState.playerStatusHint,
+                    playbackSpeed = playbackSpeed,
+                    onSpeedChange = { viewModel.setPlaybackSpeed(it) },
                     isOffline = uiState.isOffline,
                     isRateLimitBlocked = uiState.isRateLimitBlocked,
                     rateLimitMessage = uiState.rateLimitBlockedMessage,

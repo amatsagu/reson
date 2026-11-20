@@ -24,12 +24,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.WifiOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,6 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -83,6 +86,87 @@ fun formatPlaybackTime(ms: Long): String {
     } else {
         String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
     }
+}
+
+/**
+ * Supported audio playback speeds in Reson.
+ */
+val AVAILABLE_PLAYBACK_SPEEDS: List<Float> = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f)
+
+/**
+ * Formats a speed float into human-friendly tempo notation (e.g. 1.0 -> "1x", 1.25 -> "1.25x").
+ */
+fun formatPlaybackSpeed(speed: Float): String {
+    return if (speed == speed.toLong().toFloat()) {
+        "${speed.toInt()}x"
+    } else {
+        "${speed}x"
+    }
+}
+
+/**
+ * Dialog prompt for choosing playback speed without needing a full-screen player.
+ */
+@Composable
+fun PlaybackSpeedDialog(
+    currentSpeed: Float,
+    onSpeedSelect: (Float) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.playback_speed_title),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                AVAILABLE_PLAYBACK_SPEEDS.forEach { speed ->
+                    val isSelected = currentSpeed == speed
+                    val label = if (speed == 1.0f) "1x (Normal)" else formatPlaybackSpeed(speed)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else Color.Transparent
+                            )
+                            .clickable { onSpeedSelect(speed) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 15.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_done))
+            }
+        }
+    )
 }
 
 /**
@@ -193,6 +277,8 @@ fun PlaybackTimestamps(
     positionMs: () -> Long,
     durationMs: Long,
     modifier: Modifier = Modifier,
+    playbackSpeed: Float = 1.0f,
+    onSpeedClick: () -> Unit = {},
 ) {
     val pos = positionMs()
     val remainingMs = (durationMs - pos).coerceAtLeast(0L)
@@ -209,8 +295,41 @@ fun PlaybackTimestamps(
         Text(
             text = currentPositionText,
             fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        // Center bottom: playback speed button matching the font size and style of time text
+        val isCustomSpeed = playbackSpeed != 1.0f
+        val speedTextColor = if (isCustomSpeed) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+        val speedBgModifier = if (isCustomSpeed) {
+            Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+        } else {
+            Modifier
+        }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .then(speedBgModifier)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = ripple(bounded = true),
+                    onClick = onSpeedClick
+                )
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = formatPlaybackSpeed(playbackSpeed),
+                fontSize = 11.sp,
+                fontWeight = if (isCustomSpeed) FontWeight.SemiBold else FontWeight.Medium,
+                color = speedTextColor
+            )
+        }
         Text(
             text = remainingText,
             fontSize = 11.sp,
@@ -236,12 +355,15 @@ fun BottomAudioPlayerContent(
     onCloseClick: () -> Unit,
     modifier: Modifier = Modifier,
     statusHint: String? = null,
+    playbackSpeed: Float = 1.0f,
+    onSpeedChange: (Float) -> Unit = {},
 ) {
     val effectiveDurationMs = remember(durationMs, video.durationSeconds) {
         if (durationMs > 0) durationMs else (video.durationSeconds * 1000L).coerceAtLeast(1000L)
     }
 
     var currentPos by remember(video.id) { mutableLongStateOf(positionMs()) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(isPlaying, video.id) {
         if (isPlaying) {
@@ -259,7 +381,7 @@ fun BottomAudioPlayerContent(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        // Main info row: Thumbnail + Title & Author + Play/Pause & Close buttons
+        // Main info row: Thumbnail + Title & Author + Speed + Play/Pause & Close buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -401,11 +523,24 @@ fun BottomAudioPlayerContent(
             modifier = Modifier.padding(top = 2.dp)
         )
 
-        // Time indicator bar (Current elapsed on left, remaining on right)
+        // Time indicator bar (Current elapsed on left, remaining on right, speed in center bottom)
         PlaybackTimestamps(
             positionMs = { currentPos },
-            durationMs = effectiveDurationMs
+            durationMs = effectiveDurationMs,
+            playbackSpeed = playbackSpeed,
+            onSpeedClick = { showSpeedDialog = true }
         )
+
+        if (showSpeedDialog) {
+            PlaybackSpeedDialog(
+                currentSpeed = playbackSpeed,
+                onSpeedSelect = { speed ->
+                    onSpeedChange(speed)
+                    showSpeedDialog = false
+                },
+                onDismiss = { showSpeedDialog = false }
+            )
+        }
     }
 }
 
@@ -421,6 +556,8 @@ fun BottomAudioPlayerContent(
     onCloseClick: () -> Unit,
     modifier: Modifier = Modifier,
     statusHint: String? = null,
+    playbackSpeed: Float = 1.0f,
+    onSpeedChange: (Float) -> Unit = {},
 ) {
     BottomAudioPlayerContent(
         video = video,
@@ -432,7 +569,9 @@ fun BottomAudioPlayerContent(
         onSeek = onSeek,
         onCloseClick = onCloseClick,
         modifier = modifier,
-        statusHint = statusHint
+        statusHint = statusHint,
+        playbackSpeed = playbackSpeed,
+        onSpeedChange = onSpeedChange
     )
 }
 
@@ -454,6 +593,8 @@ fun ResonUnifiedBottomBar(
     onTabSelected: (ResonTab) -> Unit,
     modifier: Modifier = Modifier,
     statusHint: String? = null,
+    playbackSpeed: Float = 1.0f,
+    onSpeedChange: (Float) -> Unit = {},
     isOffline: Boolean = false,
     isRateLimitBlocked: Boolean = false,
     rateLimitMessage: String? = null,
@@ -507,7 +648,9 @@ fun ResonUnifiedBottomBar(
                             onPlayPauseClick = onPlayPauseClick,
                             onSeek = onSeek,
                             onCloseClick = onCloseClick,
-                            statusHint = statusHint
+                            statusHint = statusHint,
+                            playbackSpeed = playbackSpeed,
+                            onSpeedChange = onSpeedChange
                         )
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),

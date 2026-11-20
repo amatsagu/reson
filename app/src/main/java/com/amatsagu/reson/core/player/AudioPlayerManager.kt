@@ -50,6 +50,7 @@ data class PlaybackState(
     val currentPositionMs: Long = 0L,
     val durationMs: Long = 0L,
     val progress: Float = 0f,
+    val playbackSpeed: Float = 1.0f,
     val errorMessage: String? = null,
 )
 
@@ -61,6 +62,7 @@ data class PlaybackState(
 @OptIn(UnstableApi::class)
 class AudioPlayerManager(
     private val context: Context,
+    initialSpeed: Float = 1.0f,
     private val onProgressUpdate: (video: Video, positionMs: Long, durationMs: Long) -> Unit = { _, _, _ -> },
     private val onListeningTimeDelta: (deltaMs: Long, sync: Boolean) -> Unit = { _, _ -> },
     private val onStreamRecoveryRequested: (suspend (video: Video, positionMs: Long) -> Unit)? = null,
@@ -79,8 +81,12 @@ class AudioPlayerManager(
     private var stallPositionMs = 0L
     private var accumulatedListeningTimeMs = 0L
     private var lastListeningTickRealtime = 0L
+    private var currentPlaybackSpeed: Float = initialSpeed
+    private var pausedTimestampMs: Long = 0L
+    private var interruptionStartTimeMs: Long = 0L
+    private var wasPlayingBeforeInterruption: Boolean = false
 
-    private val _playbackState = MutableStateFlow(PlaybackState())
+    private val _playbackState = MutableStateFlow(PlaybackState(playbackSpeed = initialSpeed))
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
 
     private val playerListener = object : Player.Listener {
@@ -93,9 +99,48 @@ class AudioPlayerManager(
                 lastListeningTickRealtime = android.os.SystemClock.elapsedRealtime()
                 startProgressTicker()
             } else {
+                pausedTimestampMs = android.os.SystemClock.elapsedRealtime()
                 flushListeningTime(sync = true)
                 stopProgressTicker()
                 saveCurrentProgress()
+            }
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) {
+                applyRewindIfPausedLong()
+            }
+        }
+
+        override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+            when (playbackSuppressionReason) {
+                Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS -> {
+                    Log.i(TAG, "Audio focus lost transiently (interruption started)")
+                    interruptionStartTimeMs = android.os.SystemClock.elapsedRealtime()
+                    wasPlayingBeforeInterruption = true
+                }
+                Player.PLAYBACK_SUPPRESSION_REASON_NONE -> {
+                    if (wasPlayingBeforeInterruption) {
+                        Log.i(TAG, "Audio focus restored (interruption ended) - auto-resuming")
+                        val duration = if (interruptionStartTimeMs > 0L) {
+                            android.os.SystemClock.elapsedRealtime() - interruptionStartTimeMs
+                        } else 0L
+                        if (duration >= 60_000L) {
+                            val currentPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                            val targetPos = (currentPos - 15_000L).coerceAtLeast(0L)
+                            Log.i(TAG, "Interruption lasted ${duration / 1000}s (>60s). Rewinding 15s to $targetPos ms before auto-resuming")
+                            exoPlayer.seekTo(targetPos)
+                            val dur = exoPlayer.duration.coerceAtLeast(0L)
+                            val progress = if (dur > 0) (targetPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f) else 0f
+                            _playbackState.update { it.copy(currentPositionMs = targetPos, progress = progress) }
+                            saveCurrentProgress()
+                        }
+                        interruptionStartTimeMs = 0L
+                        wasPlayingBeforeInterruption = false
+                        exoPlayer.play()
+                    }
+                }
+                else -> {}
             }
         }
 
@@ -124,11 +169,14 @@ class AudioPlayerManager(
                     }
                 }
                 Player.STATE_ENDED -> {
+                    currentPlaybackSpeed = 1.0f
+                    exoPlayer.setPlaybackSpeed(1.0f)
                     _playbackState.update {
                         it.copy(
                             isPlaying = false,
                             isBuffering = false,
-                            progress = 1.0f
+                            progress = 1.0f,
+                            playbackSpeed = 1.0f
                         )
                     }
                     flushListeningTime(sync = true)
@@ -268,6 +316,7 @@ class AudioPlayerManager(
             .setSeekBackIncrementMs(10_000L)
             .setSeekForwardIncrementMs(10_000L)
             .build().apply {
+                setPlaybackSpeed(currentPlaybackSpeed)
                 addListener(playerListener)
             }
     }
@@ -388,6 +437,10 @@ class AudioPlayerManager(
                 val safePosition = initialPositionMs.coerceAtLeast(0L)
                 val effectiveDuration = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
 
+                // Reset playback speed to default 1.0f on video change/start (in-memory per audio state)
+                currentPlaybackSpeed = 1.0f
+                exoPlayer.setPlaybackSpeed(1.0f)
+
                 _playbackState.update {
                     it.copy(
                         currentVideo = video,
@@ -396,6 +449,7 @@ class AudioPlayerManager(
                         currentPositionMs = safePosition,
                         durationMs = effectiveDuration,
                         progress = if (effectiveDuration > 0) (safePosition.toFloat() / effectiveDuration.toFloat()).coerceIn(0f, 1f) else 0f,
+                        playbackSpeed = 1.0f,
                         errorMessage = null
                     )
                 }
@@ -414,11 +468,15 @@ class AudioPlayerManager(
 
                 // Set media item with start position atomically before prepare() to prevent Progressive seek races
                 exoPlayer.setMediaItem(mediaItem, safePosition)
+                exoPlayer.setPlaybackSpeed(currentPlaybackSpeed)
                 exoPlayer.prepare()
                 exoPlayer.play()
+                pausedTimestampMs = 0L
+                interruptionStartTimeMs = 0L
+                wasPlayingBeforeInterruption = false
                 startProgressTicker()
                 startForegroundPlaybackService()
-                Log.d(TAG, "Playback initialized for '${video.title}' (isLocal=$isLocal) starting at $safePosition ms")
+                Log.d(TAG, "Playback initialized for '${video.title}' (isLocal=$isLocal, speed=${currentPlaybackSpeed}x) starting at $safePosition ms")
             } catch (e: Throwable) {
                 Log.e(TAG, "Failed to start playback for ${video.id}", e)
                 _playbackState.update {
@@ -487,6 +545,28 @@ class AudioPlayerManager(
         }
     }
 
+    private fun applyRewindIfPausedLong() {
+        if (pausedTimestampMs > 0L) {
+            val pausedDuration = android.os.SystemClock.elapsedRealtime() - pausedTimestampMs
+            if (pausedDuration >= 60_000L) {
+                val currentPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                val targetPos = (currentPos - 15_000L).coerceAtLeast(0L)
+                Log.i(TAG, "Audio was paused for ${pausedDuration / 1000}s (>=60s). Rewinding 15s from $currentPos to $targetPos ms")
+                exoPlayer.seekTo(targetPos)
+                val duration = exoPlayer.duration.coerceAtLeast(0L)
+                val progress = if (duration > 0) (targetPos.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+                _playbackState.update {
+                    it.copy(
+                        currentPositionMs = targetPos,
+                        progress = progress
+                    )
+                }
+                saveCurrentProgress()
+            }
+            pausedTimestampMs = 0L
+        }
+    }
+
     fun pause() {
         runOnMain {
             if (exoPlayer.isPlaying) {
@@ -497,6 +577,7 @@ class AudioPlayerManager(
 
     fun resume() {
         runOnMain {
+            applyRewindIfPausedLong()
             if (exoPlayer.playbackState == Player.STATE_IDLE || _playbackState.value.errorMessage != null) {
                 // If in error or idle, trigger self recovery
                 val video = _playbackState.value.currentVideo
@@ -511,6 +592,15 @@ class AudioPlayerManager(
             if (!exoPlayer.isPlaying) {
                 exoPlayer.play()
             }
+        }
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        runOnMain {
+            currentPlaybackSpeed = speed
+            exoPlayer.setPlaybackSpeed(speed)
+            _playbackState.update { it.copy(playbackSpeed = speed) }
+            Log.d(TAG, "Playback speed updated to ${speed}x")
         }
     }
 
@@ -552,6 +642,8 @@ class AudioPlayerManager(
             continuousBufferingMs = 0L
             wasPlayingBeforeNetworkLoss = false
             stallPositionMs = 0L
+            currentPlaybackSpeed = 1.0f
+            exoPlayer.setPlaybackSpeed(1.0f)
             exoPlayer.stop()
             exoPlayer.clearMediaItems()
             stopProgressTicker()
@@ -567,6 +659,7 @@ class AudioPlayerManager(
                     isBuffering = false,
                     currentPositionMs = 0L,
                     progress = 0f,
+                    playbackSpeed = 1.0f,
                     errorMessage = null
                 )
             }

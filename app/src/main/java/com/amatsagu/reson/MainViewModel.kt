@@ -139,8 +139,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var updateJob: Job? = null
     private var selfRepairJob: Job? = null
 
+    private val userPreferences = UserPreferences.getInstance(application)
+    val themeColor: StateFlow<ThemeColor> = userPreferences.themeColor
+    val showRecommended: StateFlow<Boolean> = userPreferences.showRecommended
+    val language: StateFlow<String> = userPreferences.language
+    val totalListeningTimeMs: StateFlow<Long> = userPreferences.totalListeningTimeMs
+
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
     private val audioPlayerManager: AudioPlayerManager = AudioPlayerManager(
         context = application,
+        initialSpeed = 1.0f,
         onProgressUpdate = { video, positionMs, durationMs ->
             progressChannel.trySend(ProgressUpdate(video.id, positionMs, durationMs))
         },
@@ -166,12 +176,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Dedicated playback state flow to isolate high-frequency position updates from main UI state */
     val audioPlaybackState: StateFlow<com.amatsagu.reson.core.player.PlaybackState> = audioPlayerManager.playbackState
-
-    private val userPreferences = UserPreferences.getInstance(application)
-    val themeColor: StateFlow<ThemeColor> = userPreferences.themeColor
-    val showRecommended: StateFlow<Boolean> = userPreferences.showRecommended
-    val language: StateFlow<String> = userPreferences.language
-    val totalListeningTimeMs: StateFlow<Long> = userPreferences.totalListeningTimeMs
 
     private val _databaseStats = MutableStateFlow<DatabaseStats?>(null)
     val databaseStats: StateFlow<DatabaseStats?> = _databaseStats.asStateFlow()
@@ -341,6 +345,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // on the main screen and avoid unnecessary whole-screen recompositions during scrolling.
         viewModelScope.launch {
             audioPlayerManager.playbackState.collect { playback ->
+                _playbackSpeed.value = playback.playbackSpeed
                 _uiState.update { current ->
                     if (current.isPlaying != playback.isPlaying ||
                         current.isAudioBuffering != playback.isBuffering ||
@@ -950,10 +955,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setPlaybackSpeed(speed: Float) {
+        _playbackSpeed.value = speed
+        audioPlayerManager.setPlaybackSpeed(speed)
+    }
+
     fun closePlayer() {
         playJob?.cancel()
         playWatchdogJob?.cancel()
         audioPlayerManager.stop()
+        _playbackSpeed.value = 1.0f
         _uiState.update {
             it.copy(
                 currentPlayingVideo = null,

@@ -139,4 +139,9 @@
     <string name="settings_recommended_disabled_title">Recommendations disabled</string>
     <string name="settings_recommended_disabled_desc">You turned off recommended content. You can re-enable it anytime in Settings.</string>
     <string name="settings_language">Language</string>
+
+    <!-- Playback Speed -->
+    <string name="playback_speed_title">Playback Speed</string>
+    <string name="playback_speed_action">Change playback speed</string>
+    <string name="action_done">Done</string>
 </resources>
