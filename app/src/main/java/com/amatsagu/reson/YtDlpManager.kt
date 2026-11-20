@@ -797,12 +797,17 @@ class YtDlpManager private constructor(private val appContext: Context) {
         // 1. Check if already completely downloaded on disk
         val existing = downloadsDir.listFiles { _, name ->
             name.startsWith(videoId) && !name.endsWith(".part") && !name.endsWith(".download") && !name.endsWith(".ytdl")
-        }?.firstOrNull { it.length() > 0 }
+        }?.firstOrNull { it.length() > 1024 }
         if (existing != null) {
             Log.d(TAG, "Audio already downloaded for $videoId: ${existing.name} (${existing.length()} bytes)")
             onProgress(1f)
             return@withContext Result.Success(existing)
         }
+
+        // Clean up any stale partial downloads before starting
+        downloadsDir.listFiles { _, name ->
+            name.startsWith(videoId) && (name.contains(".download") || name.endsWith(".part") || name.endsWith(".ytdl"))
+        }?.forEach { it.delete() }
 
         executeQueued(TaskPriority.IMMEDIATE, "Download:$videoId") {
             try {
@@ -817,7 +822,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     try {
                         Log.d(TAG, "Attempting direct stream download for $videoId...")
                         val ok = downloadStreamToFile(streamUrl, tempFile, onProgress)
-                        if (ok && tempFile.exists() && tempFile.length() > 0) {
+                        if (ok && tempFile.exists() && tempFile.length() > 1024) {
                             if (finalFile.exists()) finalFile.delete()
                             if (tempFile.renameTo(finalFile)) {
                                 Log.i(TAG, "Direct stream download successful: ${finalFile.name} (${finalFile.length() / 1024} KB)")
@@ -831,9 +836,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     }
                 }
 
-                // Strategy 2: Native yt-dlp download execution
+                // Strategy 2: Native yt-dlp download execution with atomic temp rename
                 val videoUrl = if (videoId.startsWith("http")) videoId else "https://www.youtube.com/watch?v=$videoId"
-                val outputTemplate = File(downloadsDir, "$videoId.%(ext)s").absolutePath
+                val outputTemplate = File(downloadsDir, "$videoId.download.%(ext)s").absolutePath
                 val clientOptions = listOf(
                     "youtube:player_client=android,web",
                     "youtube:player_client=ios,web",
@@ -848,7 +853,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             addOption("-o", outputTemplate)
                             addOption("--no-playlist")
                             addOption("--no-warnings")
-                            addOption("--no-part")
                             if (clientArg.isNotBlank()) {
                                 addOption("--extractor-args", clientArg)
                             }
@@ -860,14 +864,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             onProgress(normalized)
                         }
 
-                        val downloadedFile = downloadsDir.listFiles { _, name ->
-                            name.startsWith(videoId) && !name.endsWith(".part") && !name.endsWith(".download") && !name.endsWith(".ytdl")
-                        }?.firstOrNull { it.length() > 0 }
+                        val downloadedTemp = downloadsDir.listFiles { _, name ->
+                            name.startsWith("$videoId.download") && !name.endsWith(".part") && !name.endsWith(".ytdl")
+                        }?.firstOrNull { it.length() > 1024 }
 
-                        if (downloadedFile != null && downloadedFile.exists()) {
-                            Log.i(TAG, "yt-dlp download successful: ${downloadedFile.name} (${downloadedFile.length() / 1024} KB)")
-                            onProgress(1f)
-                            return@executeQueued Result.Success(downloadedFile)
+                        if (downloadedTemp != null && downloadedTemp.exists()) {
+                            val finalFile = File(downloadsDir, "$videoId.m4a")
+                            if (finalFile.exists()) finalFile.delete()
+                            if (downloadedTemp.renameTo(finalFile)) {
+                                Log.i(TAG, "yt-dlp download successful: ${finalFile.name} (${finalFile.length() / 1024} KB)")
+                                onProgress(1f)
+                                return@executeQueued Result.Success(finalFile)
+                            }
                         }
                     } catch (e: Throwable) {
                         Log.w(TAG, "yt-dlp download failed with client '$clientArg': ${e.message}")
@@ -875,6 +883,11 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         if (isRateLimitError(e)) break
                     }
                 }
+
+                // Cleanup any partial files if yt-dlp failed
+                downloadsDir.listFiles { _, name ->
+                    name.startsWith(videoId) && (name.contains(".download") || name.endsWith(".part") || name.endsWith(".ytdl"))
+                }?.forEach { it.delete() }
 
                 val err = lastError ?: IllegalStateException("Download file not found on disk")
                 Result.Failure(err, err.message ?: "Failed to download audio file")
@@ -892,8 +905,11 @@ class YtDlpManager private constructor(private val appContext: Context) {
         try {
             YoutubeDL.getInstance().destroyProcessById("dl_$videoId")
             val downloadsDir = File(appContext.filesDir, "downloads")
-            val tempFile = File(downloadsDir, "$videoId.download")
-            if (tempFile.exists()) tempFile.delete()
+            if (downloadsDir.exists()) {
+                downloadsDir.listFiles { _, name ->
+                    name.startsWith(videoId) && (name.contains(".download") || name.endsWith(".part") || name.endsWith(".ytdl"))
+                }?.forEach { it.delete() }
+            }
         } catch (e: Throwable) {
             Log.w(TAG, "Failed to cancel download for $videoId", e)
         }

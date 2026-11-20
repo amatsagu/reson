@@ -74,11 +74,16 @@ class UserPreferences private constructor(context: Context) {
         prefs.edit().putString(KEY_LANGUAGE, lang).apply()
     }
 
-    fun addListeningTime(deltaMs: Long) {
+    fun addListeningTime(deltaMs: Long, sync: Boolean = false) {
         if (deltaMs <= 0L) return
         val updated = _totalListeningTimeMs.value + deltaMs
         _totalListeningTimeMs.value = updated
-        prefs.edit().putLong(KEY_TOTAL_LISTENING_MS, updated).apply()
+        val editor = prefs.edit().putLong(KEY_TOTAL_LISTENING_MS, updated)
+        if (sync) {
+            editor.commit()
+        } else {
+            editor.apply()
+        }
     }
 
     fun resetPreferences() {

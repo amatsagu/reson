@@ -93,6 +93,11 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.flushPlaybackProgressAndListeningTime(sync = true)
+    }
 }
 
 @Composable
@@ -205,6 +210,7 @@ fun ResonApp(viewModel: MainViewModel) {
                             onSelfRepair = { viewModel.selfRepair() },
                             onExportDatabase = { out, cb -> viewModel.exportDatabase(out, cb) },
                             onImportDatabase = { input, cb -> viewModel.importDatabase(input, cb) },
+                            onClearHistory = { viewModel.clearPlaybackHistory() },
                             onDeleteAllData = { cb -> viewModel.deleteAllData(cb) },
                             contentPadding = innerPadding
                         )

@@ -144,6 +144,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onProgressUpdate = { video, positionMs, durationMs ->
             progressChannel.trySend(ProgressUpdate(video.id, positionMs, durationMs))
         },
+        onListeningTimeDelta = { deltaMs, sync ->
+            userPreferences.addListeningTime(deltaMs, sync)
+        },
         onStreamRecoveryRequested = { video, positionMs ->
             addLog("Stream recovery requested for ${video.title} at $positionMs ms")
             ytDlpManager.invalidateStreamCache(video.id)
@@ -175,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // In-memory sequential download queue & active execution
     private val downloadQueueList = mutableListOf<Video>()
+    private val activeVideoOperations = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private var activeDownloadJob: Job? = null
     private var activeDownloadVideo: Video? = null
 
@@ -189,14 +193,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Progress persistence single worker: consumes updates on bounded Database dispatcher
         viewModelScope.launch(ResonDispatchers.Database) {
-            var lastPositionMs = 0L
             for (update in progressChannel) {
                 databaseManager.savePlaybackProgress(update.videoId, update.positionMs, update.durationMs, notify = false)
-                val delta = update.positionMs - lastPositionMs
-                if (delta in 1L..10_000L) {
-                    userPreferences.addListeningTime(delta)
-                }
-                lastPositionMs = update.positionMs
             }
         }
 
@@ -973,8 +971,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isNetworkBannerDismissed = true) }
     }
 
+    fun flushPlaybackProgressAndListeningTime(sync: Boolean = true) {
+        audioPlayerManager.flushListeningTime(sync = sync)
+        audioPlayerManager.saveCurrentProgress()
+    }
+
     override fun onCleared() {
         super.onCleared()
+        flushPlaybackProgressAndListeningTime(sync = true)
         progressChannel.close()
         activeDownloadJob?.cancel()
         activeDownloadVideo?.let { ytDlpManager.cancelDownload(it.id) }
@@ -997,6 +1001,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             activeDownloadJob = null
             activeDownloadVideo = null
+            activeVideoOperations.remove(videoId)
             triggerNextDownload()
             return
         }
@@ -1008,31 +1013,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update {
                     it.copy(queuedDownloadIds = it.queuedDownloadIds - videoId)
                 }
+                activeVideoOperations.remove(videoId)
                 addLog("Removed from download queue: ${video.title}")
                 return
             }
         }
 
+        // Debounce spam clicks / concurrent operations on the same video
+        if (activeVideoOperations.contains(videoId)) return
+
         // 3. If already downloaded, delete the offline file from disk and update DB
         if (video.isDownloaded || databaseManager.getDownloadedFile(videoId) != null) {
+            activeVideoOperations.add(videoId)
+            // Immediately update in-memory state across all lists for 0ms visual latency
+            _uiState.update { current ->
+                current.copy(
+                    downloadedVideos = current.downloadedVideos.filter { it.id != videoId },
+                    continueVideos = current.continueVideos.map { if (it.id == videoId) it.copy(isDownloaded = false, downloadFilePath = null) else it },
+                    feedVideos = current.feedVideos.map { if (it.id == videoId) it.copy(isDownloaded = false, downloadFilePath = null) else it },
+                    channelVideos = current.channelVideos.map { if (it.id == videoId) it.copy(isDownloaded = false, downloadFilePath = null) else it },
+                    historyVideos = current.historyVideos.map { if (it.id == videoId) it.copy(isDownloaded = false, downloadFilePath = null) else it },
+                    searchResults = current.searchResults.map { item ->
+                        if (item is SearchResultItem.Video && item.video.id == videoId) {
+                            SearchResultItem.Video(item.video.copy(isDownloaded = false, downloadFilePath = null))
+                        } else item
+                    },
+                    currentPlayingVideo = if (current.currentPlayingVideo?.id == videoId) {
+                        current.currentPlayingVideo.copy(isDownloaded = false, downloadFilePath = null)
+                    } else current.currentPlayingVideo
+                )
+            }
             viewModelScope.launch(ResonDispatchers.Database) {
-                databaseManager.deleteDownloadedFile(videoId)
-                addLog("Deleted offline download for: ${video.title}")
-                refreshDatabaseStats()
+                try {
+                    databaseManager.deleteDownloadedFile(videoId)
+                    addLog("Deleted offline download for: ${video.title}")
+                    refreshDatabaseStats()
+                } finally {
+                    activeVideoOperations.remove(videoId)
+                }
             }
             return
         }
 
         // 4. Otherwise enqueue or start download immediately
+        activeVideoOperations.add(videoId)
         synchronized(downloadQueueList) {
             if (activeDownloadVideo == null) {
                 startDownload(video)
             } else {
-                downloadQueueList.add(video)
-                _uiState.update {
-                    it.copy(queuedDownloadIds = it.queuedDownloadIds + videoId)
+                if (!downloadQueueList.any { it.id == videoId }) {
+                    downloadQueueList.add(video)
+                    _uiState.update {
+                        it.copy(queuedDownloadIds = it.queuedDownloadIds + videoId)
+                    }
+                    addLog("Queued for download (#${downloadQueueList.size}): ${video.title}")
                 }
-                addLog("Queued for download (#${downloadQueueList.size}): ${video.title}")
+                activeVideoOperations.remove(videoId)
             }
         }
     }
@@ -1040,6 +1076,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun startDownload(video: Video) {
         val videoId = video.id
         activeDownloadVideo = video
+        activeVideoOperations.add(videoId)
         // Immediately give clear feedback: 0.01f progress
         _uiState.update {
             it.copy(
@@ -1059,9 +1096,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 when (result) {
                     is Result.Success -> {
                         val file = result.data
+                        val updatedVideo = video.copy(isDownloaded = true, downloadFilePath = file.absolutePath)
                         // ONLY commit to SQLite upon complete, verified disk write
-                        databaseManager.upsertVideo(video.copy(isDownloaded = true, downloadFilePath = file.absolutePath))
+                        databaseManager.upsertVideo(updatedVideo)
                         databaseManager.updateDownloadStatus(videoId, isDownloaded = true, filePath = file.absolutePath)
+                        // Optimistically update in-memory lists so trash icon immediately appears everywhere
+                        _uiState.update { current ->
+                            val existsInDownloaded = current.downloadedVideos.any { it.id == videoId }
+                            val newDownloadedList = if (existsInDownloaded) {
+                                current.downloadedVideos.map { if (it.id == videoId) updatedVideo else it }
+                            } else {
+                                listOf(updatedVideo) + current.downloadedVideos
+                            }
+                            current.copy(
+                                downloadedVideos = newDownloadedList,
+                                continueVideos = current.continueVideos.map { if (it.id == videoId) updatedVideo else it },
+                                feedVideos = current.feedVideos.map { if (it.id == videoId) updatedVideo else it },
+                                channelVideos = current.channelVideos.map { if (it.id == videoId) updatedVideo else it },
+                                historyVideos = current.historyVideos.map { if (it.id == videoId) updatedVideo else it },
+                                searchResults = current.searchResults.map { item ->
+                                    if (item is SearchResultItem.Video && item.video.id == videoId) {
+                                        SearchResultItem.Video(updatedVideo)
+                                    } else item
+                                },
+                                currentPlayingVideo = if (current.currentPlayingVideo?.id == videoId) updatedVideo else current.currentPlayingVideo
+                            )
+                        }
                         addLog("Downloaded ${video.title} (${file.length() / 1024} KB)")
                         refreshDatabaseStats()
                     }
@@ -1081,6 +1141,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 activeDownloadVideo = null
                 activeDownloadJob = null
+                activeVideoOperations.remove(videoId)
                 triggerNextDownload()
             }
         }
@@ -1097,8 +1158,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearPlaybackHistory() {
+        _uiState.update { current ->
+            current.copy(
+                historyVideos = emptyList(),
+                continueVideos = emptyList(),
+                feedVideos = current.feedVideos.map { v -> v.copy(playbackProgress = 0f, playbackPositionMs = 0L) },
+                channelVideos = current.channelVideos.map { v -> v.copy(playbackProgress = 0f, playbackPositionMs = 0L) }
+            )
+        }
         viewModelScope.launch(ResonDispatchers.Database) {
             databaseManager.clearPlaybackHistory()
+            refreshDatabaseStats()
             addLog("Cleared listening history.")
         }
     }
@@ -1120,6 +1190,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         selfRepairJob = viewModelScope.launch(ResonDispatchers.Network) {
             addLog("Triggered clean self-repair / recovery...")
             val success = ytDlpManager.performSelfRecovery()
+            withContext(ResonDispatchers.Database) {
+                databaseManager.syncDownloadedState()
+            }
+            refreshDatabaseStats()
             if (success) {
                 addLog("Self-repair completed successfully.")
             } else {

@@ -317,31 +317,74 @@ class DatabaseManager private constructor(private val appContext: Context) {
 
     /**
      * Deletes the local offline file and resets SQLite download state.
+     * Thoroughly removes any completed audio files as well as partial download fragments.
      */
     suspend fun deleteDownloadedFile(videoId: String): Boolean = withContext(dispatcher) {
-        val file = getDownloadedFile(videoId)
         var fileDeleted = false
-        if (file != null && file.exists()) {
-            fileDeleted = file.delete()
+        val downloadsDir = File(appContext.filesDir, "downloads")
+        if (downloadsDir.exists()) {
+            downloadsDir.listFiles { _, name ->
+                name.startsWith(videoId)
+            }?.forEach { file ->
+                if (file.delete()) {
+                    fileDeleted = true
+                }
+            }
         }
+
+        val fallback = File(appContext.filesDir, "offline_${videoId}.mp3")
+        if (fallback.exists() && fallback.delete()) {
+            fileDeleted = true
+        }
+
         val dbSuccess = updateDownloadStatus(videoId, isDownloaded = false, filePath = null)
         fileDeleted || dbSuccess
     }
 
     /**
-     * Scans SQLite downloaded records and clears any ghost entries whose local files are missing on disk.
+     * Scans SQLite downloaded records and disk files for complete bidirectional consistency:
+     * 1. Cleans up any unfinished / interrupted download files (*.download, *.part, *.ytdl)
+     * 2. Clears SQLite ghost records whose local files are missing on disk
+     * 3. Deletes orphaned completed files on disk that have no committed DB record
      */
     suspend fun syncDownloadedState(): Unit = withContext(dispatcher) {
+        val downloadsDir = File(appContext.filesDir, "downloads")
+        // 1. Clean up temporary files left behind by app kills or crashes
+        if (downloadsDir.exists()) {
+            downloadsDir.listFiles { _, name ->
+                name.endsWith(".download") || name.endsWith(".part") || name.endsWith(".ytdl")
+            }?.forEach { it.delete() }
+        }
+
         val db = dbHelper.writableDatabase
         val downloaded = videoDao.getDownloadedVideos(db, 500)
+        val validDownloadedIds = mutableSetOf<String>()
         var changed = false
+
+        // 2. Verify all DB records against physical files
         for (v in downloaded) {
             val file = getDownloadedFile(v.id)
             if (file == null || !file.exists() || file.length() == 0L) {
                 videoDao.updateDownloadStatus(db, v.id, isDownloaded = false, filePath = null)
                 changed = true
+            } else {
+                validDownloadedIds.add(v.id)
             }
         }
+
+        // 3. Remove uncommitted orphan files from disk
+        if (downloadsDir.exists()) {
+            downloadsDir.listFiles { _, name ->
+                !name.endsWith(".download") && !name.endsWith(".part") && !name.endsWith(".ytdl")
+            }?.forEach { file ->
+                val videoId = file.nameWithoutExtension
+                if (videoId !in validDownloadedIds) {
+                    Log.i(TAG, "Deleting uncommitted orphan download: ${file.name}")
+                    file.delete()
+                }
+            }
+        }
+
         if (changed) {
             notifyVideoChanged()
         }

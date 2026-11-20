@@ -18,6 +18,7 @@
     <string name="action_pause">Pause</string>
     <string name="action_download">Download</string>
     <string name="action_downloaded">Downloaded</string>
+    <string name="action_delete_download">Remove download</string>
     <string name="action_download_queued">Queued for download</string>
     <string name="action_downloading">Downloading</string>
     <string name="action_follow">Follow</string>
@@ -120,6 +121,8 @@
     <string name="settings_import_confirm_desc">This will replace your current data with the selected backup file and reload the application. Continue?</string>
     <string name="settings_import_success">Data restored successfully</string>
     <string name="settings_import_failed">Failed to restore data: %1$s</string>
+    <string name="settings_clear_history">Clear History</string>
+    <string name="settings_history_cleared">Listening history cleared</string>
     <string name="settings_delete_all_data">Delete All Data</string>
     <string name="settings_delete_desc">Wipe all history, followed creators, and caches</string>
     <string name="settings_delete_confirm_title">Delete All Data?</string>

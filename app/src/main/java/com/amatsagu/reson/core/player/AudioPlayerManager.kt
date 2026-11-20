@@ -62,6 +62,7 @@ data class PlaybackState(
 class AudioPlayerManager(
     private val context: Context,
     private val onProgressUpdate: (video: Video, positionMs: Long, durationMs: Long) -> Unit = { _, _, _ -> },
+    private val onListeningTimeDelta: (deltaMs: Long, sync: Boolean) -> Unit = { _, _ -> },
     private val onStreamRecoveryRequested: (suspend (video: Video, positionMs: Long) -> Unit)? = null,
 ) {
 
@@ -76,6 +77,8 @@ class AudioPlayerManager(
     private var continuousBufferingMs = 0L
     private var wasPlayingBeforeNetworkLoss = false
     private var stallPositionMs = 0L
+    private var accumulatedListeningTimeMs = 0L
+    private var lastListeningTickRealtime = 0L
 
     private val _playbackState = MutableStateFlow(PlaybackState())
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
@@ -87,8 +90,10 @@ class AudioPlayerManager(
                 recoveryAttempts = 0
                 isRecovering = false
                 continuousBufferingMs = 0L
+                lastListeningTickRealtime = android.os.SystemClock.elapsedRealtime()
                 startProgressTicker()
             } else {
+                flushListeningTime(sync = true)
                 stopProgressTicker()
                 saveCurrentProgress()
             }
@@ -126,6 +131,7 @@ class AudioPlayerManager(
                             progress = 1.0f
                         )
                     }
+                    flushListeningTime(sync = true)
                     stopProgressTicker()
                     val video = _playbackState.value.currentVideo
                     val duration = exoPlayer.duration.coerceAtLeast(0L)
@@ -522,6 +528,8 @@ class AudioPlayerManager(
 
     fun seekTo(positionMs: Long) {
         runOnMain {
+            flushListeningTime(sync = false)
+            lastListeningTickRealtime = android.os.SystemClock.elapsedRealtime()
             val safePos = positionMs.coerceAtLeast(0L)
             exoPlayer.seekTo(safePos)
             val duration = exoPlayer.duration.coerceAtLeast(0L)
@@ -538,6 +546,7 @@ class AudioPlayerManager(
 
     fun stop() {
         runOnMain {
+            flushListeningTime(sync = true)
             saveCurrentProgress()
             isRecovering = false
             continuousBufferingMs = 0L
@@ -565,6 +574,8 @@ class AudioPlayerManager(
     }
 
     fun release() {
+        flushListeningTime(sync = true)
+        saveCurrentProgress()
         stopProgressTicker()
         exoPlayer.removeListener(playerListener)
         mediaSession?.release()
@@ -574,8 +585,27 @@ class AudioPlayerManager(
         scope.cancel()
     }
 
+    fun flushListeningTime(sync: Boolean = false) {
+        if (accumulatedListeningTimeMs > 0L) {
+            val toFlush = accumulatedListeningTimeMs
+            accumulatedListeningTimeMs = 0L
+            onListeningTimeDelta(toFlush, sync)
+        }
+    }
+
+    fun saveCurrentProgress() {
+        val video = _playbackState.value.currentVideo ?: return
+        val pos = _playbackState.value.currentPositionMs
+        val dur = _playbackState.value.durationMs
+        lastSavedPositionMs = pos
+        if (pos > 0 || dur > 0) {
+            onProgressUpdate(video, pos, dur)
+        }
+    }
+
     private fun startProgressTicker() {
         tickerJob?.cancel()
+        lastListeningTickRealtime = android.os.SystemClock.elapsedRealtime()
         tickerJob = scope.launch {
             while (isActive) {
                 delay(400)
@@ -588,6 +618,20 @@ class AudioPlayerManager(
                         durationMs = if (duration > 0) duration else it.durationMs,
                         progress = progress
                     )
+                }
+
+                // Accurate real-time listening accumulation while audio is actively playing and ready
+                val nowRealtime = android.os.SystemClock.elapsedRealtime()
+                val tickElapsed = if (lastListeningTickRealtime > 0L) (nowRealtime - lastListeningTickRealtime) else 0L
+                lastListeningTickRealtime = nowRealtime
+
+                if (exoPlayer.isPlaying && exoPlayer.playbackState == Player.STATE_READY && tickElapsed in 1L..2000L) {
+                    accumulatedListeningTimeMs += tickElapsed
+                    if (accumulatedListeningTimeMs >= 1000L) {
+                        val toFlush = accumulatedListeningTimeMs
+                        accumulatedListeningTimeMs = 0L
+                        onListeningTimeDelta(toFlush, false)
+                    }
                 }
 
                 // Check buffering stall watchdog
@@ -639,16 +683,6 @@ class AudioPlayerManager(
     private fun stopProgressTicker() {
         tickerJob?.cancel()
         tickerJob = null
-    }
-
-    private fun saveCurrentProgress() {
-        val video = _playbackState.value.currentVideo ?: return
-        val pos = _playbackState.value.currentPositionMs
-        val dur = _playbackState.value.durationMs
-        lastSavedPositionMs = pos
-        if (pos > 0 || dur > 0) {
-            onProgressUpdate(video, pos, dur)
-        }
     }
 
     companion object {

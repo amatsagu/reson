@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -76,7 +77,7 @@ import java.util.Locale
 /**
  * Settings Screen with 3 dedicated sections:
  * 1. App details (Engine, SQLite schema, download stats, listening time, update & self-repair)
- * 2. Data control (Export, Import, Delete all with confirmation dialogs)
+ * 2. Data control (Export, Import, Clear history, Delete all with confirmation dialogs)
  * 3. User preferences (Theme color picker, Recommendations toggle, Language selection)
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,6 +96,7 @@ fun SettingsScreen(
     onSelfRepair: () -> Unit,
     onExportDatabase: (OutputStream, (Boolean, String?) -> Unit) -> Unit,
     onImportDatabase: (InputStream, (Boolean, String?) -> Unit) -> Unit,
+    onClearHistory: () -> Unit = {},
     onDeleteAllData: (() -> Unit) -> Unit,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier
@@ -113,6 +115,7 @@ fun SettingsScreen(
     val importSuccessMsg = stringResource(R.string.settings_import_success)
     val importFailedTemplate = stringResource(R.string.settings_import_failed)
     val deleteSuccessMsg = stringResource(R.string.settings_delete_success)
+    val historyClearedMsg = stringResource(R.string.settings_history_cleared)
 
     // Export file picker launcher
     val exportLauncher = rememberLauncherForActivityResult(
@@ -315,6 +318,26 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(text = stringResource(R.string.settings_import_data), fontSize = 14.sp)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Clear History Button (No confirmation prompt needed)
+                OutlinedButton(
+                    onClick = {
+                        onClearHistory()
+                        Toast.makeText(context, historyClearedMsg, Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.History,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(text = stringResource(R.string.settings_clear_history), fontSize = 14.sp)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
