@@ -42,10 +42,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -238,6 +241,19 @@ fun BottomAudioPlayerContent(
         if (durationMs > 0) durationMs else (video.durationSeconds * 1000L).coerceAtLeast(1000L)
     }
 
+    var currentPos by remember(video.id) { mutableLongStateOf(positionMs()) }
+
+    LaunchedEffect(isPlaying, video.id) {
+        if (isPlaying) {
+            while (isActive) {
+                currentPos = positionMs()
+                delay(250.milliseconds)
+            }
+        } else {
+            currentPos = positionMs()
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -375,10 +391,11 @@ fun BottomAudioPlayerContent(
         // Interactive seek bar (no circle thumb dot)
         InteractiveResonProgressBar(
             progress = {
-                if (effectiveDurationMs > 0) (positionMs().toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f) else 0f
+                if (effectiveDurationMs > 0) (currentPos.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f) else 0f
             },
             onSeek = { ratio ->
                 val targetMs = (ratio * effectiveDurationMs).toLong()
+                currentPos = targetMs
                 onSeek(targetMs)
             },
             modifier = Modifier.padding(top = 2.dp)
@@ -386,7 +403,7 @@ fun BottomAudioPlayerContent(
 
         // Time indicator bar (Current elapsed on left, remaining on right)
         PlaybackTimestamps(
-            positionMs = positionMs,
+            positionMs = { currentPos },
             durationMs = effectiveDurationMs
         )
     }
