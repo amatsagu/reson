@@ -1,0 +1,338 @@
+package com.amatsagu.reson.data.local
+
+import android.content.Context
+import android.util.Log
+import com.amatsagu.reson.data.local.dao.ChannelDao
+import com.amatsagu.reson.data.local.dao.VideoDao
+import com.amatsagu.reson.model.Channel
+import com.amatsagu.reson.model.Video
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+/**
+ * Statistics snapshot of the SQLite database.
+ */
+data class DatabaseStats(
+    val followedChannelCount: Long,
+    val totalVideoCount: Long,
+    val continueListeningCount: Long,
+    val downloadedVideoCount: Long,
+    val databaseSizeBytes: Long,
+)
+
+/**
+ * Central thread-safe Database Manager for Reson.
+ * Designed similarly to YtDlpManager with clean suspend APIs and reactive Kotlin Flows.
+ */
+class DatabaseManager private constructor(private val appContext: Context) {
+
+    private val dbHelper = ResonDatabaseHelper(appContext)
+    private val channelDao = ChannelDao()
+    private val videoDao = VideoDao()
+    private val mutex = Mutex()
+
+    // Invalidation triggers to notify reactive Flows when data mutations occur
+    private val channelInvalidationTrigger = MutableSharedFlow<Unit>(replay = 1).apply {
+        tryEmit(Unit)
+    }
+    private val videoInvalidationTrigger = MutableSharedFlow<Unit>(replay = 1).apply {
+        tryEmit(Unit)
+    }
+
+    /* -------------------------------------------------------------------------
+     * Channels / Creators API
+     * ------------------------------------------------------------------------- */
+
+    /**
+     * Follows a channel, inserting or updating its record with is_followed = 1.
+     * Automatically notifies active observers.
+     */
+    suspend fun followChannel(channel: Channel): Unit = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            channelDao.upsertChannel(db, channel, isFollowed = true)
+            Log.d(TAG, "Followed channel: ${channel.title} (${channel.id})")
+        }
+        notifyChannelChanged()
+        notifyVideoChanged()
+    }
+
+    /**
+     * Unfollows a channel (sets is_followed = 0).
+     */
+    suspend fun unfollowChannel(channelId: String): Boolean = withContext(Dispatchers.IO) {
+        val success = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            val updated = channelDao.setFollowStatus(db, channelId, isFollowed = false)
+            Log.d(TAG, "Unfollowed channel $channelId: $updated")
+            updated
+        }
+        if (success) {
+            notifyChannelChanged()
+            notifyVideoChanged()
+        }
+        success
+    }
+
+    /**
+     * Checks if a channel is currently followed.
+     */
+    suspend fun isChannelFollowed(channelId: String): Boolean = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        channelDao.isChannelFollowed(db, channelId)
+    }
+
+    /**
+     * Returns a snapshot of all currently followed channels sorted by follow time.
+     */
+    suspend fun getFollowedChannels(): List<Channel> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        channelDao.getFollowedChannels(db)
+    }
+
+    /**
+     * Returns a Set of followed channel IDs for fast O(1) membership checks.
+     */
+    suspend fun getFollowedChannelIds(): Set<String> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        channelDao.getFollowedChannelIds(db)
+    }
+
+    /**
+     * Reactive Flow observing followed channels. Re-emits automatically on mutation.
+     */
+    fun observeFollowedChannels(): Flow<List<Channel>> = flow {
+        channelInvalidationTrigger.collect {
+            emit(getFollowedChannels())
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Reactive Flow observing followed channel IDs set.
+     */
+    fun observeFollowedChannelIds(): Flow<Set<String>> = flow {
+        channelInvalidationTrigger.collect {
+            emit(getFollowedChannelIds())
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /* -------------------------------------------------------------------------
+     * Videos / Feed API
+     * ------------------------------------------------------------------------- */
+
+    /**
+     * Bulk inserts or updates videos in a single high-performance SQLite transaction.
+     */
+    suspend fun upsertVideos(videos: List<Video>, defaultChannelId: String = ""): Unit = withContext(Dispatchers.IO) {
+        if (videos.isEmpty()) return@withContext
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.upsertVideos(db, videos, defaultChannelId)
+            Log.d(TAG, "Upserted ${videos.size} videos (default channel: '$defaultChannelId')")
+        }
+        notifyVideoChanged()
+    }
+
+    /**
+     * Inserts or updates a single video.
+     */
+    suspend fun upsertVideo(video: Video, channelId: String = ""): Unit = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.upsertVideo(db, video, channelId)
+        }
+        notifyVideoChanged()
+    }
+
+    /**
+     * Fetches a video by its unique YouTube ID.
+     */
+    suspend fun getVideoById(videoId: String): Video? = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        videoDao.getVideoById(db, videoId)
+    }
+
+    /**
+     * Gets recent videos from all followed channels.
+     */
+    suspend fun getFeedVideos(limit: Int = 50): List<Video> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        videoDao.getFeedVideos(db, limit)
+    }
+
+    /**
+     * Reactive Flow of recent uploads from followed channels.
+     */
+    fun observeFeedVideos(limit: Int = 50): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getFeedVideos(limit))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Gets videos for a specific channel.
+     */
+    suspend fun getVideosForChannel(channelId: String, limit: Int = 50): List<Video> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        videoDao.getVideosForChannel(db, channelId, limit)
+    }
+
+    /* -------------------------------------------------------------------------
+     * Playback & Continue Listening API
+     * ------------------------------------------------------------------------- */
+
+    /**
+     * Updates playback progress for a video, recording lastPlayedAt timestamp.
+     */
+    suspend fun savePlaybackProgress(
+        videoId: String,
+        positionMs: Long,
+        durationMs: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val success = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.updatePlaybackProgress(db, videoId, positionMs, durationMs)
+        }
+        if (success) {
+            notifyVideoChanged()
+        }
+        success
+    }
+
+    /**
+     * Marks a video as completed (progress = 1.0f) so it exits the continue listening list.
+     */
+    suspend fun markVideoCompleted(videoId: String): Boolean = withContext(Dispatchers.IO) {
+        val video = getVideoById(videoId) ?: return@withContext false
+        val durationMs = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
+        savePlaybackProgress(videoId, durationMs, durationMs)
+    }
+
+    /**
+     * Fetches in-progress videos (between 2% and 95% complete) for the Continue section.
+     */
+    suspend fun getContinueListeningVideos(limit: Int = 10): List<Video> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        videoDao.getContinueListeningVideos(db, limit)
+    }
+
+    /**
+     * Reactive Flow observing in-progress continue listening videos.
+     */
+    fun observeContinueListening(limit: Int = 10): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getContinueListeningVideos(limit))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /* -------------------------------------------------------------------------
+     * Downloads API
+     * ------------------------------------------------------------------------- */
+
+    /**
+     * Updates download status and stored file path.
+     */
+    suspend fun updateDownloadStatus(
+        videoId: String,
+        isDownloaded: Boolean,
+        filePath: String? = null,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val success = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.updateDownloadStatus(db, videoId, isDownloaded, filePath)
+        }
+        if (success) {
+            notifyVideoChanged()
+        }
+        success
+    }
+
+    /**
+     * Gets all downloaded videos.
+     */
+    suspend fun getDownloadedVideos(): List<Video> = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        videoDao.getDownloadedVideos(db)
+    }
+
+    /**
+     * Reactive Flow observing downloaded videos.
+     */
+    fun observeDownloadedVideos(): Flow<List<Video>> = flow {
+        videoInvalidationTrigger.collect {
+            emit(getDownloadedVideos())
+        }
+    }.flowOn(Dispatchers.IO)
+
+    /* -------------------------------------------------------------------------
+     * Maintenance & Diagnostics
+     * ------------------------------------------------------------------------- */
+
+    /**
+     * Gathers high-level statistics about stored channels, videos, and database size.
+     */
+    suspend fun getStats(): DatabaseStats = withContext(Dispatchers.IO) {
+        val db = dbHelper.readableDatabase
+        val channels = channelDao.countFollowed(db)
+        val videos = videoDao.countVideos(db)
+        val continueCount = videoDao.getContinueListeningVideos(db, 100).size.toLong()
+        val downloaded = videoDao.countDownloaded(db)
+        val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
+        val sizeBytes = if (dbFile.exists()) dbFile.length() else 0L
+
+        DatabaseStats(
+            followedChannelCount = channels,
+            totalVideoCount = videos,
+            continueListeningCount = continueCount,
+            downloadedVideoCount = downloaded,
+            databaseSizeBytes = sizeBytes,
+        )
+    }
+
+    /**
+     * Clears all channels, videos, and search history tables.
+     */
+    suspend fun clearAll(): Unit = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            db.beginTransaction()
+            try {
+                db.delete("videos", null, null)
+                db.delete("channels", null, null)
+                db.delete("search_history", null, null)
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+            }
+        }
+        notifyChannelChanged()
+        notifyVideoChanged()
+    }
+
+    private fun notifyChannelChanged() {
+        channelInvalidationTrigger.tryEmit(Unit)
+    }
+
+    private fun notifyVideoChanged() {
+        videoInvalidationTrigger.tryEmit(Unit)
+    }
+
+    companion object {
+        private const val TAG = "Reson:DbMgr"
+
+        @Volatile
+        private var instance: DatabaseManager? = null
+
+        fun getInstance(context: Context): DatabaseManager {
+            return instance ?: synchronized(this) {
+                instance ?: DatabaseManager(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+}

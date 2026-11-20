@@ -17,7 +17,11 @@ data class Video(
     val webpageUrl: String = "https://www.youtube.com/watch?v=$id",
     val playbackProgress: Float = 0f,
     val isDownloaded: Boolean = false,
-    val downloadProgress: Float? = null
+    val downloadProgress: Float? = null,
+    val channelId: String = "",
+    val playbackPositionMs: Long = 0L,
+    val playbackDurationMs: Long = 0L,
+    val lastPlayedAt: Long = 0L,
 )
 
 /**
@@ -31,7 +35,8 @@ data class Channel(
     val subscriberCount: Long = 0L,
     val subscriberCountText: String = "",
     val isFollowed: Boolean = false,
-    val lastVideoReleaseSec: Long = 0L
+    val lastVideoReleaseSec: Long = 0L,
+    val followedAt: Long = 0L,
 )
 
 /**
