@@ -36,7 +36,7 @@ class VideoDao {
         }
     }
 
-    fun getFeedVideos(db: SQLiteDatabase, limit: Int = 50): List<Video> {
+    fun getFeedVideos(db: SQLiteDatabase, limit: Int = 30, offset: Int = 0): List<Video> {
         val videos = mutableListOf<Video>()
         // Join with followed channels so we only fetch content from active subscriptions
         val query = """
@@ -44,9 +44,9 @@ class VideoDao {
             INNER JOIN channels c ON v.channel_id = c.id
             WHERE c.is_followed = 1
             ORDER BY v.release_timestamp DESC, v.created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(limit.toString())).use { cursor ->
+        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 videos.add(cursorToVideo(cursor))
             }
@@ -71,10 +71,10 @@ class VideoDao {
         return videos
     }
 
-    fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 50): List<Video> {
+    fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 30, offset: Int = 0): List<Video> {
         val videos = mutableListOf<Video>()
-        val query = "SELECT * FROM videos WHERE channel_id = ? ORDER BY release_timestamp DESC, created_at DESC LIMIT ?"
-        db.rawQuery(query, arrayOf(channelId, limit.toString())).use { cursor ->
+        val query = "SELECT * FROM videos WHERE channel_id = ? ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
+        db.rawQuery(query, arrayOf(channelId, limit.toString(), offset.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 videos.add(cursorToVideo(cursor))
             }
@@ -83,9 +83,14 @@ class VideoDao {
     }
 
     /**
-     * Fetches recent videos from subscribed channels, limited to maxPerChannel to prevent overwhelming the UI.
+     * Fetches recent videos from subscribed channels, limited to maxPerChannel with pagination support.
      */
-    fun getRecentVideosFromFollowedChannels(db: SQLiteDatabase, maxPerChannel: Int = 5): List<Video> {
+    fun getRecentVideosFromFollowedChannels(
+        db: SQLiteDatabase,
+        maxPerChannel: Int = 5,
+        limit: Int = 30,
+        offset: Int = 0,
+    ): List<Video> {
         val videos = mutableListOf<Video>()
         val query = """
             SELECT v.* FROM (
@@ -99,8 +104,9 @@ class VideoDao {
             ) v
             WHERE v.rn <= ?
             ORDER BY v.release_timestamp DESC, v.created_at DESC
+            LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(maxPerChannel.toString())).use { cursor ->
+        db.rawQuery(query, arrayOf(maxPerChannel.toString(), limit.toString(), offset.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 videos.add(cursorToVideo(cursor))
             }

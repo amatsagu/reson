@@ -175,53 +175,53 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Gets recent videos from all followed channels.
+     * Gets recent videos from all followed channels with pagination support.
      */
-    suspend fun getFeedVideos(limit: Int = 50): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getFeedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
         val db = dbHelper.readableDatabase
-        videoDao.getFeedVideos(db, limit)
+        videoDao.getFeedVideos(db, limit, offset)
     }
 
     /**
-     * Reactive Flow of recent uploads from followed channels.
+     * Reactive Flow of recent uploads from followed channels (initial page).
      */
-    fun observeFeedVideos(limit: Int = 50): Flow<List<Video>> = flow {
+    fun observeFeedVideos(limit: Int = 30): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
-            emit(getFeedVideos(limit))
+            emit(getFeedVideos(limit, offset = 0))
         }
     }.flowOn(Dispatchers.IO)
 
     /**
-     * Gets videos for a specific channel.
+     * Gets videos for a specific channel with pagination support.
      */
-    suspend fun getVideosForChannel(channelId: String, limit: Int = 50): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getVideosForChannel(channelId: String, limit: Int = 30, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
         val db = dbHelper.readableDatabase
-        videoDao.getVideosForChannel(db, channelId, limit)
+        videoDao.getVideosForChannel(db, channelId, limit, offset)
     }
 
     /**
      * Reactive Flow of videos for a specific channel.
      */
-    fun observeVideosForChannel(channelId: String, limit: Int = 50): Flow<List<Video>> = flow {
+    fun observeVideosForChannel(channelId: String, limit: Int = 30): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
-            emit(getVideosForChannel(channelId, limit))
+            emit(getVideosForChannel(channelId, limit, offset = 0))
         }
     }.flowOn(Dispatchers.IO)
 
     /**
-     * Gets recent uploads from followed channels, limited to maxPerChannel to avoid laggy long lists.
+     * Gets recent uploads from followed channels, limited to maxPerChannel with pagination support.
      */
-    suspend fun getRecentVideosFromFollowed(maxPerChannel: Int = 5): List<Video> = withContext(Dispatchers.IO) {
+    suspend fun getRecentVideosFromFollowed(maxPerChannel: Int = 5, limit: Int = 30, offset: Int = 0): List<Video> = withContext(Dispatchers.IO) {
         val db = dbHelper.readableDatabase
-        videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel)
+        videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel, limit, offset)
     }
 
     /**
      * Reactive Flow observing recent uploads from followed channels (maxPerChannel).
      */
-    fun observeRecentVideosFromFollowed(maxPerChannel: Int = 5): Flow<List<Video>> = flow {
+    fun observeRecentVideosFromFollowed(maxPerChannel: Int = 5, limit: Int = 30): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
-            emit(getRecentVideosFromFollowed(maxPerChannel))
+            emit(getRecentVideosFromFollowed(maxPerChannel, limit, offset = 0))
         }
     }.flowOn(Dispatchers.IO)
 

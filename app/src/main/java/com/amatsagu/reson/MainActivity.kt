@@ -21,19 +21,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -112,6 +117,8 @@ fun ResonApp(viewModel: MainViewModel) {
                         onSearchClick = { viewModel.openSearch() },
                         onPlayVideo = { viewModel.playVideo(it) },
                         onDownloadVideo = { viewModel.downloadVideo(it) },
+                        isFeedLoadingMore = uiState.isFeedLoadingMore,
+                        onLoadMore = { viewModel.loadMoreFeedVideos() },
                         contentPadding = innerPadding
                     )
                 }
@@ -121,10 +128,12 @@ fun ResonApp(viewModel: MainViewModel) {
                         selectedChannelId = uiState.selectedChannelId,
                         videos = uiState.channelVideos,
                         isSyncing = uiState.isSyncingChannels,
+                        isChannelLoadingMore = uiState.isChannelLoadingMore,
                         onSelectChannel = { viewModel.selectChannelFilter(it) },
                         onFollowClick = { viewModel.toggleFollowChannel(it) },
                         onPlayVideo = { viewModel.playVideo(it) },
                         onDownloadVideo = { viewModel.downloadVideo(it) },
+                        onLoadMore = { viewModel.loadMoreChannelVideos() },
                         onSearchClick = { viewModel.openSearch() },
                         contentPadding = innerPadding
                     )
@@ -150,6 +159,8 @@ fun ResonApp(viewModel: MainViewModel) {
             suggestions = uiState.suggestions,
             isSearching = uiState.isSearching,
             searchResults = uiState.searchResults,
+            isSearchLoadingMore = uiState.isSearchLoadingMore,
+            onLoadMore = { viewModel.loadMoreSearchResults() },
             errorRes = uiState.searchErrorRes,
             errorArg = uiState.searchErrorArg,
             onPlayVideo = { viewModel.playVideo(it) },
@@ -178,9 +189,26 @@ fun FeedScreen(
     onSearchClick: () -> Unit,
     onPlayVideo: (Video) -> Unit,
     onDownloadVideo: (Video) -> Unit,
+    isFeedLoadingMore: Boolean,
+    onLoadMore: () -> Unit,
     contentPadding: PaddingValues,
 ) {
     val hasContent = uiState.continueVideos.isNotEmpty() || uiState.feedVideos.isNotEmpty()
+    val listState = rememberLazyListState()
+
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 3
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value) {
+            onLoadMore()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -210,6 +238,7 @@ fun FeedScreen(
             )
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -245,6 +274,23 @@ fun FeedScreen(
                                 onPlayClick = { onPlayVideo(video) },
                                 onDownloadClick = { onDownloadVideo(video) }
                             )
+                        }
+                    }
+
+                    if (isFeedLoadingMore) {
+                        item(key = "feed_loading_more_indicator", contentType = "loading_spinner") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 2.5.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -312,13 +358,31 @@ fun ChannelsScreen(
     selectedChannelId: String?,
     videos: List<Video>,
     isSyncing: Boolean,
+    isChannelLoadingMore: Boolean,
     onSelectChannel: (String?) -> Unit,
     onFollowClick: (Channel) -> Unit,
     onPlayVideo: (Video) -> Unit,
     onDownloadVideo: (Video) -> Unit,
+    onLoadMore: () -> Unit,
     onSearchClick: () -> Unit,
     contentPadding: PaddingValues,
 ) {
+    val listState = rememberLazyListState()
+
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 3
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value) {
+            onLoadMore()
+        }
+    }
+
     if (followedChannels.isEmpty()) {
         Column(
             modifier = Modifier
@@ -366,6 +430,7 @@ fun ChannelsScreen(
         }
     } else {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding),
@@ -475,6 +540,23 @@ fun ChannelsScreen(
                         )
                     }
                 }
+
+                if (isChannelLoadingMore) {
+                    item(key = "channel_loading_more_indicator", contentType = "loading_spinner") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(28.dp),
+                                strokeWidth = 2.5.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -562,6 +644,8 @@ fun ResonFeedEmptyPreview() {
                 onSearchClick = {},
                 onPlayVideo = {},
                 onDownloadVideo = {},
+                isFeedLoadingMore = false,
+                onLoadMore = {},
                 contentPadding = PaddingValues(0.dp)
             )
         }
@@ -625,6 +709,8 @@ fun ResonFeedWithContentPreview() {
                 onSearchClick = {},
                 onPlayVideo = {},
                 onDownloadVideo = {},
+                isFeedLoadingMore = false,
+                onLoadMore = {},
                 contentPadding = PaddingValues(0.dp)
             )
         }

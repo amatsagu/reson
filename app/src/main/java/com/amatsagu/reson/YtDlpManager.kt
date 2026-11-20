@@ -459,11 +459,12 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     /**
      * Performs a fast search using yt-dlp with --flat-playlist and Android player client.
-     * Returns a list of parsed Video items (up to maxResults).
+     * Supports windowed pagination via startIndex and maxResults.
      */
     suspend fun searchContent(
         query: String,
-        maxResults: Int = 30
+        maxResults: Int = 30,
+        startIndex: Int = 1,
     ): Result<List<Video>> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
@@ -473,17 +474,20 @@ class YtDlpManager private constructor(private val appContext: Context) {
             val isDirectUrl = trimmed.startsWith("http://", ignoreCase = true) ||
                     trimmed.startsWith("https://", ignoreCase = true)
 
-            val searchTarget = if (isDirectUrl) trimmed else "ytsearch$maxResults:$trimmed"
+            val targetEnd = startIndex + maxResults - 1
+            val searchTarget = if (isDirectUrl) trimmed else "ytsearch$targetEnd:$trimmed"
 
             val request = YoutubeDLRequest(searchTarget).apply {
                 addOption("--flat-playlist")
                 addOption("--dump-json")
                 addOption("--skip-download")
                 addOption("--no-warnings")
+                addOption("--playlist-start", startIndex.toString())
+                addOption("--playlist-end", targetEnd.toString())
                 addOption("--extractor-args", "youtubetab:approximate_date")
             }
 
-            Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget)")
+            Log.i(TAG, "Executing fast search for '$trimmed' (target: $searchTarget, range: $startIndex..$targetEnd)")
             val response = mutex.withLock {
                 YoutubeDL.getInstance().execute(request)
             }

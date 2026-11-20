@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -38,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -120,6 +122,8 @@ fun SearchOverlay(
     suggestions: List<String>,
     isSearching: Boolean,
     searchResults: List<SearchResultItem>,
+    isSearchLoadingMore: Boolean = false,
+    onLoadMore: () -> Unit = {},
     @androidx.annotation.StringRes errorRes: Int? = null,
     errorArg: String? = null,
     onPlayVideo: (Video) -> Unit,
@@ -129,6 +133,22 @@ fun SearchOverlay(
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+
+    // Detect when scrolling near the end to trigger infinite scroll load-more
+    val shouldLoadMore = remember {
+        derivedStateOf {
+            val total = listState.layoutInfo.totalItemsCount
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            total > 0 && lastVisible >= total - 3
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore.value) {
+        if (shouldLoadMore.value) {
+            onLoadMore()
+        }
+    }
 
     // Instantly request focus and show keyboard when overlay becomes visible
     LaunchedEffect(visible) {
@@ -294,6 +314,7 @@ fun SearchOverlay(
                     // If we have search results
                     searchResults.isNotEmpty() -> {
                         LazyColumn(
+                            state = listState,
                             contentPadding = PaddingValues(vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -330,6 +351,23 @@ fun SearchOverlay(
                                             channel = item.channel,
                                             onFollowClick = { onFollowChannel(item.channel) },
                                             modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (isSearchLoadingMore) {
+                                item(key = "search_loading_more_indicator", contentType = "loading_spinner") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(28.dp),
+                                            strokeWidth = 2.5.dp,
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }

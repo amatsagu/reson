@@ -56,12 +56,20 @@ data class MainUiState(
     val continueVideos: List<Video> = emptyList(),
     val feedVideos: List<Video> = emptyList(),
 
+    // Pagination & Infinite Scroll states
+    val isFeedLoadingMore: Boolean = false,
+    val canLoadMoreFeed: Boolean = true,
+    val isChannelLoadingMore: Boolean = false,
+    val canLoadMoreChannelVideos: Boolean = true,
+    val isSearchLoadingMore: Boolean = false,
+    val canLoadMoreSearch: Boolean = true,
+
     // Mini Player State
     val currentPlayingVideo: Video? = null,
     val isPlaying: Boolean = false,
 
     // Diagnostics
-    val diagnosticLogs: List<String> = emptyList()
+    val diagnosticLogs: List<String> = emptyList(),
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -253,6 +261,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 searchQuery = trimmed,
                 isSearching = true,
+                isSearchLoadingMore = false,
+                canLoadMoreSearch = true,
                 suggestions = emptyList(),
                 searchErrorRes = null,
                 searchErrorArg = null
@@ -318,14 +328,120 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Filters the recent uploads list to a specific channel (or null for All channels).
      */
     fun selectChannelFilter(channelId: String?) {
-        _uiState.update { it.copy(selectedChannelId = channelId) }
+        _uiState.update {
+            it.copy(
+                selectedChannelId = channelId,
+                canLoadMoreChannelVideos = true,
+                isChannelLoadingMore = false
+            )
+        }
         viewModelScope.launch {
             val videos = if (channelId == null) {
-                databaseManager.getRecentVideosFromFollowed(maxPerChannel = 5)
+                databaseManager.getRecentVideosFromFollowed(maxPerChannel = 5, limit = PAGE_SIZE, offset = 0)
             } else {
-                databaseManager.getVideosForChannel(channelId, limit = 50)
+                databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
             }
-            _uiState.update { it.copy(channelVideos = videos) }
+            _uiState.update { it.copy(channelVideos = videos, canLoadMoreChannelVideos = videos.size >= PAGE_SIZE) }
+        }
+    }
+
+    /**
+     * Infinite scroll pagination: loads next page of feed videos from followed channels.
+     */
+    fun loadMoreFeedVideos() {
+        val state = _uiState.value
+        if (state.isFeedLoadingMore || !state.canLoadMoreFeed || state.feedVideos.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFeedLoadingMore = true) }
+            val currentOffset = _uiState.value.feedVideos.size
+            val nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentOffset)
+
+            _uiState.update { current ->
+                val existingIds = current.feedVideos.map { it.id }.toSet()
+                val newUnique = nextBatch.filter { !existingIds.contains(it.id) }
+                current.copy(
+                    feedVideos = current.feedVideos + newUnique,
+                    isFeedLoadingMore = false,
+                    canLoadMoreFeed = nextBatch.size >= PAGE_SIZE
+                )
+            }
+        }
+    }
+
+    /**
+     * Infinite scroll pagination: loads next page of channel uploads.
+     */
+    fun loadMoreChannelVideos() {
+        val state = _uiState.value
+        if (state.isChannelLoadingMore || !state.canLoadMoreChannelVideos || state.channelVideos.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isChannelLoadingMore = true) }
+            val currentOffset = _uiState.value.channelVideos.size
+            val selectedId = _uiState.value.selectedChannelId
+
+            val nextBatch = if (selectedId == null) {
+                databaseManager.getRecentVideosFromFollowed(maxPerChannel = 5, limit = PAGE_SIZE, offset = currentOffset)
+            } else {
+                databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = currentOffset)
+            }
+
+            _uiState.update { current ->
+                val existingIds = current.channelVideos.map { it.id }.toSet()
+                val newUnique = nextBatch.filter { !existingIds.contains(it.id) }
+                current.copy(
+                    channelVideos = current.channelVideos + newUnique,
+                    isChannelLoadingMore = false,
+                    canLoadMoreChannelVideos = nextBatch.size >= PAGE_SIZE
+                )
+            }
+        }
+    }
+
+    /**
+     * Infinite scroll pagination: loads next page of search results via yt-dlp.
+     */
+    fun loadMoreSearchResults() {
+        val state = _uiState.value
+        if (state.isSearchLoadingMore || !state.canLoadMoreSearch || state.isSearching || state.searchQuery.isBlank()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSearchLoadingMore = true) }
+            val currentVideoCount = _uiState.value.searchResults.count { it is SearchResultItem.Video }
+            val nextStartIndex = currentVideoCount + 1
+
+            val result = ytDlpManager.searchContent(
+                query = state.searchQuery,
+                maxResults = PAGE_SIZE,
+                startIndex = nextStartIndex
+            )
+
+            when (result) {
+                is Result.Success -> {
+                    val newVideos = result.data
+                    _uiState.update { current ->
+                        val existingIds = current.searchResults.map { it.id }.toSet()
+                        val newUniqueItems = newVideos
+                            .filter { !existingIds.contains("video_${it.id}") }
+                            .map { SearchResultItem.Video(it) }
+
+                        current.copy(
+                            searchResults = current.searchResults + newUniqueItems,
+                            isSearchLoadingMore = false,
+                            canLoadMoreSearch = newVideos.size >= PAGE_SIZE
+                        )
+                    }
+                }
+                is Result.Failure -> {
+                    _uiState.update {
+                        it.copy(
+                            isSearchLoadingMore = false,
+                            canLoadMoreSearch = false
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -520,5 +636,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 currentPlayingVideo = null,
             )
         }
+    }
+
+    companion object {
+        private const val PAGE_SIZE = 25
     }
 }
