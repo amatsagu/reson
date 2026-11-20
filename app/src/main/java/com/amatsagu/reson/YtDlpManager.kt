@@ -191,6 +191,75 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         /**
+         * Checks if an extraction failure was caused by supporter/member restrictions, paywalls,
+         * or private authentication gates that cannot be bypassed without user login.
+         */
+        fun isLockedVideoError(error: Throwable): Boolean {
+            val msg = (error.message ?: "").lowercase()
+            return msg.contains("members-only") ||
+                    msg.contains("members only") ||
+                    msg.contains("join this channel") ||
+                    msg.contains("subscriber-only") ||
+                    msg.contains("subscriber only") ||
+                    msg.contains("this video is available to this channel's members") ||
+                    msg.contains("requires payment") ||
+                    msg.contains("private video")
+        }
+
+        /**
+         * Identifies whether a raw video entry from yt-dlp is locked/supporters-only/members-only/paywalled
+         * or an upcoming unreleased premiere, so it is silently dropped across all searches and feeds.
+         */
+        fun isLockedVideo(json: org.json.JSONObject): Boolean {
+            val availability = json.optCleanString("availability").lowercase()
+            if (availability in setOf("subscriber_only", "needs_auth", "premium_only", "private", "rental", "purchase")) {
+                return true
+            }
+
+            if (json.optBoolean("requires_payment", false) ||
+                json.optBoolean("paywalled", false) ||
+                json.optBoolean("is_unplayable", false)
+            ) {
+                return true
+            }
+
+            val liveStatus = json.optCleanString("live_status").lowercase()
+            if (liveStatus == "is_upcoming") {
+                return true
+            }
+
+            val badgeStr = json.optCleanString("badge").lowercase()
+            if (badgeStr.isNotEmpty() && (badgeStr.contains("member") || badgeStr.contains("supporter") || badgeStr.contains("subscriber_only") || badgeStr.contains("premium"))) {
+                return true
+            }
+
+            val badgesArray = json.optJSONArray("badges")
+            if (badgesArray != null) {
+                for (i in 0 until badgesArray.length()) {
+                    val b = badgesArray.opt(i)?.toString()?.lowercase() ?: ""
+                    if (b.contains("member") || b.contains("supporter") || b.contains("subscriber_only") || b.contains("paywall") || b.contains("premium")) {
+                        return true
+                    }
+                }
+            }
+
+            val title = json.optCleanString("title")
+            return isLockedVideoTitle(title)
+        }
+
+        /**
+         * Checks a video title for explicit supporters/members-only badges or bracketed tags.
+         */
+        fun isLockedVideoTitle(title: String): Boolean {
+            if (title.isBlank()) return false
+            val regexBracket = "(?i)[\\[(](?:members?|supporters?|subscribers?)[-\\s]only[])]".toRegex()
+            if (regexBracket.containsMatchIn(title)) return true
+
+            val regexDelim = "(?i)(?:^|[-|•:])\\s*(?:members?|supporters?)[-\\s]only\\s*(?:$|[-|•:])".toRegex()
+            return regexDelim.containsMatchIn(title)
+        }
+
+        /**
          * Formats release date into compact relative time to save space:
          * e.g. "57m ago", "1d3h ago", "3d ago", "2w ago", "4mo ago", "2y ago".
          */
@@ -267,6 +336,25 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         /**
+         * Parses text subscriber count (e.g. "4.34M subscribers", "462K subscribers", "12 subscribers") into a Long.
+         */
+        fun parseSubscriberCount(text: String?): Long {
+            if (text.isNullOrBlank()) return 0L
+            val cleaned = text.trim()
+            val regex = "([0-9]+(?:\\.[0-9]+)?)\\s*([kKmMbB])?".toRegex()
+            val match = regex.find(cleaned) ?: return 0L
+            val numStr = match.groupValues[1]
+            val suffix = match.groupValues[2].uppercase()
+            val value = numStr.toDoubleOrNull() ?: return 0L
+            return when (suffix) {
+                "K" -> (value * 1_000).toLong()
+                "M" -> (value * 1_000_000).toLong()
+                "B" -> (value * 1_000_000_000).toLong()
+                else -> value.toLong()
+            }
+        }
+
+        /**
          * Cleans version string by removing any engine prefixes like "yt-dlp "
          * so only clean semantic/date version numbers are displayed in the UI.
          */
@@ -331,12 +419,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
             channels: List<Channel>,
             videos: List<Video>
         ): List<Channel> {
+            val qNorm = query.lowercase().filter { it.isLetterOrDigit() }
+
             val scored = channels.mapNotNull { ch ->
                 val isExactHandle = isHandleExactMatch(query, ch.handle)
-                if (ch.subscriberCount < 1000 && !isExactHandle) {
-                    return@mapNotNull null
-                }
-
                 val similarity = calculateSimilarity(query, ch.title, ch.handle)
                 if (similarity < 0.45) return@mapNotNull null
 
@@ -346,8 +432,23 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
 
                 val hasRecentVideo = matchingVideo != null
+
+                val tNorm = ch.title.lowercase().filter { it.isLetterOrDigit() }
+                val hNorm = ch.handle.lowercase().removePrefix("@").filter { it.isLetterOrDigit() }
+                val titleOrHandleContainsQuery = qNorm.isNotEmpty() && (tNorm.contains(qNorm) || hNorm.contains(qNorm))
+
+                // Drop tiny channels under 1000 subscribers unless exact handle, or if subscriber count is unknown (<=0)
+                // but title/handle strongly matches query or has a recent video in results.
+                if (ch.subscriberCount in 1..999 && !isExactHandle) {
+                    return@mapNotNull null
+                }
+                if (ch.subscriberCount <= 0L && !isExactHandle && !hasRecentVideo && !titleOrHandleContainsQuery) {
+                    return@mapNotNull null
+                }
+
                 val subScore = log10(ch.subscriberCount.coerceAtLeast(100L).toDouble())
-                val totalScore = (similarity * 10.0) + subScore + (if (hasRecentVideo) 3.0 else 0.0)
+                val bonus = if (titleOrHandleContainsQuery) 2.5 else 0.0
+                val totalScore = (similarity * 10.0) + subScore + (if (hasRecentVideo) 3.0 else 0.0) + bonus
 
                 ch to totalScore
             }
@@ -754,14 +855,14 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         } catch (e: Throwable) {
                             Log.w(TAG, "Stream extraction with client '$clientArg' (format '$format') failed: ${e.message}")
                             lastException = e
-                            if (isRateLimitError(e)) {
+                            if (isRateLimitError(e) || isLockedVideoError(e)) {
                                 break@outerLoop
                             }
                         }
                     }
                 }
 
-                if (autoRetryWithUpdate && lastException is YoutubeDLException) {
+                if (autoRetryWithUpdate && lastException is YoutubeDLException && !isLockedVideoError(lastException)) {
                     Log.i(TAG, "Attempting auto-patch update and retry for stream URL...")
                     val updateResult = update(UpdateChannel.STABLE, priority = TaskPriority.IMMEDIATE)
                     if (updateResult is Result.Success) {
@@ -770,8 +871,11 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
 
                 val isBlocked = consecutiveRateLimits >= 2 || (lastException != null && isRateLimitError(lastException))
+                val isLocked = lastException != null && isLockedVideoError(lastException)
                 val failureMsg = if (isBlocked) {
                     "YouTube is blocking requests (HTTP 429 / Captcha). Waiting before retry."
+                } else if (isLocked) {
+                    "This video is restricted to channel members or supporters."
                 } else {
                     "Failed to extract audio stream URL"
                 }
@@ -1051,6 +1155,12 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
                     try {
                         val json = org.json.JSONObject(jsonLine)
+                        // Silently drop locked/supporters-only/members-only/paywalled videos
+                        if (isLockedVideo(json)) {
+                            Log.d(TAG, "Silently dropping locked/supporters-only video: ${json.optCleanString("id")}")
+                            continue
+                        }
+
                         val id = json.optCleanString("id")
                         if (id.isEmpty()) continue
 
@@ -1127,21 +1237,35 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     /**
      * Searches YouTube channels for the query using the type=channel filter (sp=EgIQAg%3D%3D).
+     * Attempts ultra-fast direct HTTP parsing of ytInitialData first (~300-800ms, immune to lockupViewModel issues),
+     * falling back to yt-dlp CLI if needed.
      */
     suspend fun searchChannels(
         query: String,
-        maxResults: Int = 3,
+        maxResults: Int = 8,
         priority: TaskPriority = TaskPriority.INTERACTIVE
     ): Result<List<Channel>> = withContext(networkDispatcher) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return@withContext Result.Success(emptyList())
 
+        val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
+        val channelSearchUrl = "https://www.youtube.com/results?search_query=$encodedQuery&sp=EgIQAg%3D%3D"
+
+        // 1. Direct HTTP extraction first
+        try {
+            val directChannels = fetchChannelsDirectHttp(channelSearchUrl, maxResults)
+            if (directChannels.isNotEmpty()) {
+                Log.i(TAG, "Direct channel search for '$trimmed' succeeded with ${directChannels.size} channels")
+                return@withContext Result.Success(directChannels)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Direct channel search failed for '$trimmed', falling back to yt-dlp: ${e.message}")
+        }
+
+        // 2. Fallback to yt-dlp CLI
         executeQueued(priority, "SearchChannels:$trimmed") {
             try {
                 ensureReady()
-                val encodedQuery = URLEncoder.encode(trimmed, "UTF-8")
-                val channelSearchUrl = "https://www.youtube.com/results?search_query=$encodedQuery&sp=EgIQAg%3D%3D"
-
                 val request = YoutubeDLRequest(channelSearchUrl).apply {
                     addOption("--flat-playlist")
                     addOption("--dump-json")
@@ -1150,7 +1274,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     addOption("--playlist-end", maxResults.toString())
                 }
 
-                Log.i(TAG, "Searching channels for '$trimmed'")
+                Log.i(TAG, "Searching channels with yt-dlp for '$trimmed'")
                 val response = YoutubeDL.getInstance().execute(request)
                 val channels = mutableListOf<Channel>()
 
@@ -1172,8 +1296,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         val handle = json.optCleanString("uploader_id").ifEmpty {
                             json.optCleanString("uploader")
                         }
-                        val subs = json.optLong("channel_follower_count", 0L)
-                        val subsText = formatSubscriberCount(subs)
+                        var subs = json.optLong("channel_follower_count", 0L)
+                        var subsText = json.optCleanString("channel_follower_count_text").ifEmpty {
+                            json.optCleanString("subscribers")
+                        }
+                        if (subs == 0L && subsText.isNotEmpty()) {
+                            subs = parseSubscriberCount(subsText)
+                        } else if (subs > 0L && subsText.isEmpty()) {
+                            subsText = formatSubscriberCount(subs)
+                        }
 
                         var avatar = ""
                         val thumbs = json.optJSONArray("thumbnails")
@@ -1202,7 +1333,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                                 handle = handle,
                                 avatarUrl = avatar,
                                 subscriberCount = subs,
-                                subscriberCountText = subsText
+                                subscriberCountText = subsText.ifEmpty { formatSubscriberCount(subs) }
                             )
                         )
                     } catch (e: Exception) {
@@ -1216,6 +1347,170 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 Result.Success(emptyList())
             }
         }
+    }
+
+    private data class ParsedChannel(
+        val id: String,
+        val title: String,
+        val handle: String,
+        val subs: Long,
+        val subsText: String,
+        val avatar: String
+    )
+
+    private fun fetchChannelsDirectHttp(channelSearchUrl: String, maxResults: Int): List<Channel> {
+        val conn = (java.net.URL(channelSearchUrl).openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "GET"
+            setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            connectTimeout = 6000
+            readTimeout = 8000
+            instanceFollowRedirects = true
+        }
+
+        val html = conn.inputStream.bufferedReader().use { it.readText() }
+        val idx = html.indexOf("ytInitialData = ")
+        if (idx == -1) return emptyList()
+
+        val start = idx + "ytInitialData = ".length
+        var end = html.indexOf(";</script>", start)
+        if (end == -1) {
+            end = html.indexOf(";\n", start)
+        }
+        if (end == -1) {
+            end = html.indexOf("};", start)
+            if (end != -1) end += 1
+        }
+        if (end <= start) return emptyList()
+
+        val jsonStr = html.substring(start, end).trim()
+        val root = org.json.JSONObject(jsonStr)
+
+        val rawRenderers = mutableListOf<org.json.JSONObject>()
+        extractRenderersRecursive(root, rawRenderers)
+
+        val channels = mutableListOf<Channel>()
+        val seenIds = mutableSetOf<String>()
+
+        for (item in rawRenderers) {
+            if (channels.size >= maxResults) break
+            val parsed = parseChannelItem(item) ?: continue
+            if (parsed.id.isEmpty() || seenIds.contains(parsed.id)) continue
+            seenIds.add(parsed.id)
+
+            channels.add(
+                Channel(
+                    id = parsed.id,
+                    title = parsed.title,
+                    handle = parsed.handle,
+                    avatarUrl = parsed.avatar,
+                    subscriberCount = parsed.subs,
+                    subscriberCountText = parsed.subsText.ifEmpty { formatSubscriberCount(parsed.subs) }
+                )
+            )
+        }
+
+        return channels
+    }
+
+    private fun extractRenderersRecursive(obj: Any, out: MutableList<org.json.JSONObject>) {
+        when (obj) {
+            is org.json.JSONObject -> {
+                if (obj.has("channelRenderer")) {
+                    obj.optJSONObject("channelRenderer")?.let { out.add(it) }
+                } else if (obj.has("lockupViewModel")) {
+                    obj.optJSONObject("lockupViewModel")?.let { out.add(it) }
+                } else {
+                    val keys = obj.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        extractRenderersRecursive(obj.get(k), out)
+                    }
+                }
+            }
+            is org.json.JSONArray -> {
+                for (i in 0 until obj.length()) {
+                    extractRenderersRecursive(obj.get(i), out)
+                }
+            }
+        }
+    }
+
+    private fun parseChannelItem(obj: org.json.JSONObject): ParsedChannel? {
+        val id = obj.optCleanString("channelId").ifEmpty {
+            obj.optCleanString("contentId")
+        }
+        if (id.isEmpty()) return null
+
+        val title = obj.optJSONObject("title")?.optCleanString("simpleText")?.ifEmpty {
+            obj.optJSONObject("title")?.optJSONArray("runs")?.optJSONObject(0)?.optCleanString("text")
+        } ?: obj.optJSONObject("metadata")?.optJSONObject("lockupMetadataViewModel")?.optJSONObject("title")?.optCleanString("content") ?: ""
+
+        if (title.isEmpty()) return null
+
+        val navUrl = obj.optJSONObject("navigationEndpoint")?.optJSONObject("browseEndpoint")?.optCleanString("canonicalBaseUrl")
+            ?: obj.optJSONObject("rendererContext")?.optJSONObject("commandContext")?.optJSONObject("onTap")
+                ?.optJSONObject("innertubeCommand")?.optJSONObject("browseEndpoint")?.optCleanString("canonicalBaseUrl")
+            ?: ""
+
+        val s1 = obj.optJSONObject("subscriberCountText")?.optCleanString("simpleText") ?: ""
+        val s2 = obj.optJSONObject("videoCountText")?.optCleanString("simpleText") ?: ""
+
+        var handle = ""
+        if (navUrl.startsWith("/@")) {
+            handle = navUrl.removePrefix("/")
+        } else if (s1.startsWith("@")) {
+            handle = s1
+        } else if (s2.startsWith("@")) {
+            handle = s2
+        }
+
+        var subs = 0L
+        var subsText = ""
+        if (s1.contains("subscriber", ignoreCase = true)) {
+            subsText = s1
+            subs = parseSubscriberCount(s1)
+        } else if (s2.contains("subscriber", ignoreCase = true)) {
+            subsText = s2
+            subs = parseSubscriberCount(s2)
+        } else {
+            val p1 = parseSubscriberCount(s1)
+            val p2 = parseSubscriberCount(s2)
+            if (p1 > 0) {
+                subs = p1
+                subsText = s1
+            } else if (p2 > 0) {
+                subs = p2
+                subsText = s2
+            }
+        }
+
+        var avatar = ""
+        val thumbs = obj.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
+            ?: obj.optJSONObject("image")?.optJSONArray("sources")
+
+        if (thumbs != null && thumbs.length() > 0) {
+            for (i in 0 until thumbs.length()) {
+                val t = thumbs.optJSONObject(i) ?: continue
+                val u = t.optCleanString("url")
+                val w = t.optInt("width", 0)
+                if (u.isNotEmpty() && (w in 88..250)) {
+                    avatar = u
+                    break
+                }
+            }
+            if (avatar.isEmpty()) {
+                avatar = thumbs.optJSONObject(0)?.optCleanString("url") ?: ""
+            }
+        }
+        if (avatar.startsWith("//")) {
+            avatar = "https:$avatar"
+        }
+
+        return ParsedChannel(id, title, handle, subs, subsText, avatar)
     }
 
     /**

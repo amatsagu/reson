@@ -86,6 +86,7 @@ dependencies {
     implementation(libs.androidx.media3.session)
 
     testImplementation(libs.junit)
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }

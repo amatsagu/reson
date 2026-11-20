@@ -151,21 +151,25 @@ class DatabaseManager private constructor(private val appContext: Context) {
 
     /**
      * Bulk inserts or updates videos in a single high-performance SQLite transaction.
+     * Silently ignores any locked/supporters-only videos.
      */
     suspend fun upsertVideos(videos: List<Video>, defaultChannelId: String = ""): Unit = withContext(dispatcher) {
-        if (videos.isEmpty()) return@withContext
+        val validVideos = videos.filterNot { com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(it.title) }
+        if (validVideos.isEmpty()) return@withContext
         mutex.withLock {
             val db = dbHelper.writableDatabase
-            videoDao.upsertVideos(db, videos, defaultChannelId)
-            Log.d(TAG, "Upserted ${videos.size} videos (default channel: '$defaultChannelId')")
+            videoDao.upsertVideos(db, validVideos, defaultChannelId)
+            Log.d(TAG, "Upserted ${validVideos.size} videos (default channel: '$defaultChannelId')")
         }
         notifyVideoChanged()
     }
 
     /**
      * Inserts or updates a single video.
+     * Silently ignores any locked/supporters-only video.
      */
     suspend fun upsertVideo(video: Video, channelId: String = ""): Unit = withContext(dispatcher) {
+        if (com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(video.title)) return@withContext
         mutex.withLock {
             val db = dbHelper.writableDatabase
             videoDao.upsertVideo(db, video, channelId)
@@ -183,10 +187,17 @@ class DatabaseManager private constructor(private val appContext: Context) {
 
     /**
      * Gets recent videos from all followed channels with pagination support.
+     * Uses balanced distribution across followed channels (up to 5 recent uploads per channel)
+     * to prevent high-frequency uploaders from starving the feed.
      */
     suspend fun getFeedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
-        videoDao.getFeedVideos(db, limit, offset)
+        val balanced = videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel = 5, limit = limit, offset = offset)
+        if (balanced.isNotEmpty() || offset > 0) {
+            balanced
+        } else {
+            videoDao.getFeedVideos(db, limit, offset)
+        }
     }
 
     /**

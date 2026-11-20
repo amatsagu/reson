@@ -136,6 +136,47 @@ class YtDlpManagerTest {
     }
 
     @Test
+    fun testParseSubscriberCount() {
+        assertEquals(4_340_000L, YtDlpManager.parseSubscriberCount("4.34M subscribers"))
+        assertEquals(462_000L, YtDlpManager.parseSubscriberCount("462K subscribers"))
+        assertEquals(12L, YtDlpManager.parseSubscriberCount("12 subscribers"))
+        assertEquals(1L, YtDlpManager.parseSubscriberCount("1 subscriber"))
+        assertEquals(29_400L, YtDlpManager.parseSubscriberCount("29.4K subscribers"))
+        assertEquals(0L, YtDlpManager.parseSubscriberCount("@beyondfireship"))
+        assertEquals(0L, YtDlpManager.parseSubscriberCount(""))
+        assertEquals(0L, YtDlpManager.parseSubscriberCount(null))
+    }
+
+    @Test
+    fun testFilterAndRankChannels_fireshipAndBeyondFireship() {
+        val channels = listOf(
+            com.amatsagu.reson.model.Channel(
+                id = "UCsBjURrPoezykLs9EqgamOA",
+                title = "Fireship",
+                handle = "@Fireship",
+                subscriberCount = 4_340_000L
+            ),
+            com.amatsagu.reson.model.Channel(
+                id = "UC2Xd-TjJByJyK2w1zNwY0zQ",
+                title = "Beyond Fireship",
+                handle = "@beyondfireship",
+                subscriberCount = 462_000L
+            ),
+            com.amatsagu.reson.model.Channel(
+                id = "small_fan",
+                title = "Fireship Fan",
+                handle = "@fireshipfan",
+                subscriberCount = 15L
+            )
+        )
+
+        val ranked = YtDlpManager.filterAndRankChannels("fireship", channels, emptyList())
+        assertEquals(2, ranked.size)
+        assertEquals("UCsBjURrPoezykLs9EqgamOA", ranked[0].id)
+        assertEquals("UC2Xd-TjJByJyK2w1zNwY0zQ", ranked[1].id)
+    }
+
+    @Test
     fun testIsHandleExactMatch() {
         assertTrue(YtDlpManager.isHandleExactMatch("SmugAlana", "@SmugAlana"))
         assertTrue(YtDlpManager.isHandleExactMatch("@SmugAlana", "@SmugAlana"))
@@ -211,5 +252,50 @@ class YtDlpManagerTest {
         assertTrue(blocked is RateLimitStatus.Blocked)
         assertEquals("YouTube is persistently blocking requests (429)", (blocked as RateLimitStatus.Blocked).message)
         assertEquals(60L, blocked.backoffSeconds)
+    }
+
+    @Test
+    fun testIsLockedVideoTitle() {
+        assertTrue(YtDlpManager.isLockedVideoTitle("Exclusive Livestream [Members Only]"))
+        assertTrue(YtDlpManager.isLockedVideoTitle("Behind the Scenes (Supporters Only)"))
+        assertTrue(YtDlpManager.isLockedVideoTitle("Live Q&A - Members Only"))
+        assertTrue(YtDlpManager.isLockedVideoTitle("Special Post [Member-Only]"))
+        assertTrue(YtDlpManager.isLockedVideoTitle("Podcast #10 [Subscribers Only]"))
+        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoTitle("JavaScript in 100 Seconds"))
+        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoTitle("Regular Member Podcast #42"))
+        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoTitle("How to get channel members"))
+    }
+
+    @Test
+    fun testIsLockedVideo_jsonAttributes() {
+        val json1 = org.json.JSONObject().put("title", "Test Video").put("availability", "subscriber_only")
+        assertTrue(YtDlpManager.isLockedVideo(json1))
+
+        val json2 = org.json.JSONObject().put("title", "Test Video").put("availability", "needs_auth")
+        assertTrue(YtDlpManager.isLockedVideo(json2))
+
+        val json3 = org.json.JSONObject().put("title", "Test Video").put("requires_payment", true)
+        assertTrue(YtDlpManager.isLockedVideo(json3))
+
+        val json4 = org.json.JSONObject().put("title", "Test Video").put("live_status", "is_upcoming")
+        assertTrue(YtDlpManager.isLockedVideo(json4))
+
+        val json5 = org.json.JSONObject().put("title", "Test Video")
+            .put("badges", org.json.JSONArray().put("BADGE_STYLE_TYPE_MEMBERS_ONLY"))
+        assertTrue(YtDlpManager.isLockedVideo(json5))
+
+        val jsonPublic = org.json.JSONObject().put("title", "Normal Public Video")
+            .put("availability", "public")
+            .put("requires_payment", false)
+        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideo(jsonPublic))
+    }
+
+    @Test
+    fun testIsLockedVideoError() {
+        assertTrue(YtDlpManager.isLockedVideoError(RuntimeException("Join this channel to get access to members-only content")))
+        assertTrue(YtDlpManager.isLockedVideoError(RuntimeException("This video is available to this channel's members on level VIP")))
+        assertTrue(YtDlpManager.isLockedVideoError(RuntimeException("Private video. Sign in to view.")))
+        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("HTTP Error 429: Too Many Requests")))
+        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("Network connection timed out")))
     }
 }

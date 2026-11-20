@@ -511,9 +511,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         addLog("Executing unified search for: '$trimmed'...")
 
         searchJob = viewModelScope.launch(ResonDispatchers.Network) {
-            // Concurrently query related videos and relevant channels
+            // Concurrently query related videos and relevant channels (up to 8 channels to prevent premature cutoff)
             val videoDeferred = async { ytDlpManager.searchContent(trimmed, maxResults = 30) }
-            val channelDeferred = async { ytDlpManager.searchChannels(trimmed, maxResults = 3) }
+            val channelDeferred = async { ytDlpManager.searchChannels(trimmed, maxResults = 8) }
 
             val videoResult = videoDeferred.await()
             val channelResult = channelDeferred.await()
@@ -521,10 +521,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (videoResult) {
                 is Result.Success -> {
                     val rawVideos = videoResult.data
-                    val rawChannels = if (channelResult is Result.Success) channelResult.data else emptyList()
+                    val rawChannels = (if (channelResult is Result.Success) channelResult.data else emptyList()).toMutableList()
+
+                    // Also harvest channel candidates directly from rawVideos if not already present in rawChannels
+                    val existingChannelIds = rawChannels.map { it.id }.toMutableSet()
+                    for (v in rawVideos) {
+                        if (v.channelId.isNotBlank() && !existingChannelIds.contains(v.channelId) && v.channelTitle.isNotBlank()) {
+                            val sim = YtDlpManager.calculateSimilarity(trimmed, v.channelTitle, "")
+                            if (sim >= 0.60) {
+                                existingChannelIds.add(v.channelId)
+                                rawChannels.add(
+                                    Channel(
+                                        id = v.channelId,
+                                        title = v.channelTitle
+                                    )
+                                )
+                            }
+                        }
+                    }
+
                     val followed = _uiState.value.followedChannels
 
-                    // Filter out random channels (similarity < 0.6) and rank by similarity, subs & activity on Default dispatcher
+                    // Filter out random channels and rank by similarity, subs & activity on Default dispatcher
                     val (filteredChannels, mergedResults) = withContext(ResonDispatchers.Computation) {
                         val filtered = YtDlpManager.filterAndRankChannels(
                             query = trimmed,

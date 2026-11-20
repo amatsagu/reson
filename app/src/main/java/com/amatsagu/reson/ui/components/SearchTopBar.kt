@@ -50,6 +50,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
@@ -246,7 +251,18 @@ fun SearchOverlay(
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .focusRequester(focusRequester),
+                        .focusRequester(focusRequester)
+                        .onKeyEvent { keyEvent ->
+                            if (keyEvent.type == KeyEventType.KeyUp &&
+                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                            ) {
+                                keyboardController?.hide()
+                                onSearch(textFieldValue.text)
+                                true
+                            } else {
+                                false
+                            }
+                        },
                     singleLine = true,
                     textStyle = TextStyle(
                         fontSize = 15.sp,
