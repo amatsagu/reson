@@ -61,7 +61,10 @@ import com.amatsagu.reson.ui.components.ResonUnifiedBottomBar
 import com.amatsagu.reson.ui.components.SearchOverlay
 import com.amatsagu.reson.ui.components.SearchPillBar
 import com.amatsagu.reson.ui.components.VideoItem
+import com.amatsagu.reson.ui.screens.SettingsScreen
 import com.amatsagu.reson.ui.theme.ResonTheme
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 class MainActivity : ComponentActivity() {
 
@@ -71,7 +74,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            ResonTheme(dynamicColor = true) {
+            val themeColor by viewModel.themeColor.collectAsStateWithLifecycle()
+            ResonTheme(themeColor = themeColor) {
                 ResonApp(viewModel = viewModel)
             }
         }
@@ -82,6 +86,11 @@ class MainActivity : ComponentActivity() {
 fun ResonApp(viewModel: MainViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val ytDlpState by viewModel.ytDlpState.collectAsStateWithLifecycle()
+    val showRecommended by viewModel.showRecommended.collectAsStateWithLifecycle()
+    val themeColor by viewModel.themeColor.collectAsStateWithLifecycle()
+    val language by viewModel.language.collectAsStateWithLifecycle()
+    val databaseStats by viewModel.databaseStats.collectAsStateWithLifecycle()
+    val totalListeningTimeMs by viewModel.totalListeningTimeMs.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -122,6 +131,7 @@ fun ResonApp(viewModel: MainViewModel) {
                     ResonTab.Feed -> {
                         FeedScreen(
                             uiState = uiState,
+                            showRecommended = showRecommended,
                             onSearchClick = { viewModel.openSearch() },
                             onPlayVideo = { viewModel.playVideo(it) },
                             onDownloadVideo = { viewModel.downloadVideo(it) },
@@ -155,6 +165,25 @@ fun ResonApp(viewModel: MainViewModel) {
                             ytDlpState = ytDlpState,
                             onCheckUpdate = { viewModel.checkUpdate() },
                             onSelfRepair = { viewModel.selfRepair() },
+                            contentPadding = innerPadding
+                        )
+                    }
+                    ResonTab.Settings -> {
+                        SettingsScreen(
+                            ytDlpState = ytDlpState,
+                            databaseStats = databaseStats,
+                            totalListeningTimeMs = totalListeningTimeMs,
+                            currentThemeColor = themeColor,
+                            showRecommended = showRecommended,
+                            currentLanguage = language,
+                            onThemeColorSelected = { viewModel.setThemeColor(it) },
+                            onShowRecommendedChanged = { viewModel.setShowRecommended(it) },
+                            onLanguageSelected = { viewModel.setLanguage(it) },
+                            onCheckUpdate = { viewModel.checkUpdate() },
+                            onSelfRepair = { viewModel.selfRepair() },
+                            onExportDatabase = { out, cb -> viewModel.exportDatabase(out, cb) },
+                            onImportDatabase = { input, cb -> viewModel.importDatabase(input, cb) },
+                            onDeleteAllData = { cb -> viewModel.deleteAllData(cb) },
                             contentPadding = innerPadding
                         )
                     }
@@ -204,6 +233,7 @@ fun ResonApp(viewModel: MainViewModel) {
 @Composable
 fun FeedScreen(
     uiState: MainUiState,
+    showRecommended: Boolean = true,
     onSearchClick: () -> Unit,
     onPlayVideo: (Video) -> Unit,
     onDownloadVideo: (Video) -> Unit,
@@ -212,7 +242,7 @@ fun FeedScreen(
     onLoadMoreContinue: () -> Unit = {},
     contentPadding: PaddingValues,
 ) {
-    val hasContent = uiState.continueVideos.isNotEmpty() || uiState.feedVideos.isNotEmpty()
+    val hasContent = uiState.continueVideos.isNotEmpty() || (showRecommended && uiState.feedVideos.isNotEmpty())
     val listState = rememberLazyListState()
 
     val shouldLoadMore = remember {
@@ -224,7 +254,7 @@ fun FeedScreen(
     }
 
     LaunchedEffect(shouldLoadMore.value) {
-        if (shouldLoadMore.value) {
+        if (shouldLoadMore.value && showRecommended) {
             onLoadMore()
         }
     }
@@ -247,14 +277,24 @@ fun FeedScreen(
         }
 
         if (!hasContent) {
-            // Friendly centered empty state encouraging user to search
-            EmptyFeedState(
-                onSearchClick = onSearchClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 32.dp)
-            )
+            if (!showRecommended && uiState.continueVideos.isEmpty()) {
+                // Empty state when user disabled recommendations and has no continue listening items
+                RecommendationsDisabledFeedState(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 32.dp)
+                )
+            } else {
+                // Friendly centered empty state encouraging user to search
+                EmptyFeedState(
+                    onSearchClick = onSearchClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 32.dp)
+                )
+            }
         } else {
             LazyColumn(
                 state = listState,
@@ -278,7 +318,7 @@ fun FeedScreen(
                     }
                 }
 
-                if (uiState.feedVideos.isNotEmpty()) {
+                if (showRecommended && uiState.feedVideos.isNotEmpty()) {
                     item(key = "recommended_header", contentType = "header") {
                         AdaptiveSectionHeader(
                             fullTitle = stringResource(R.string.section_recommended_content),
@@ -319,6 +359,14 @@ fun FeedScreen(
                                 )
                             }
                         }
+                    }
+                } else if (!showRecommended) {
+                    item(key = "recommendations_disabled_message") {
+                        RecommendationsDisabledFeedState(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp, vertical = 24.dp)
+                        )
                     }
                 }
             }
@@ -370,6 +418,57 @@ fun EmptyFeedState(
 
         Text(
             text = stringResource(R.string.feed_empty_description),
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            lineHeight = 20.sp,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+    }
+}
+
+/**
+ * Friendly empty state displayed when recommended content is disabled by user preference.
+ * Matches the exact styling and proportions of [EmptyFeedState].
+ */
+@Composable
+fun RecommendationsDisabledFeedState(
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.VisibilityOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(42.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = stringResource(R.string.settings_recommended_disabled_title),
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = stringResource(R.string.settings_recommended_disabled_desc),
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -661,7 +760,7 @@ fun LibraryScreen(
 @androidx.compose.ui.tooling.preview.Preview(name = "Empty Feed (Fresh Start)", showBackground = true)
 @Composable
 fun ResonFeedEmptyPreview() {
-    ResonTheme(dynamicColor = true) {
+    ResonTheme {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -686,7 +785,7 @@ fun ResonFeedEmptyPreview() {
 @androidx.compose.ui.tooling.preview.Preview(name = "Populated Feed", showBackground = true)
 @Composable
 fun ResonFeedWithContentPreview() {
-    ResonTheme(dynamicColor = true) {
+    ResonTheme {
         Box(
             modifier = Modifier
                 .fillMaxSize()

@@ -68,5 +68,6 @@ sealed interface SearchResultItem {
 enum class ResonTab(@StringRes val titleRes: Int) {
     Feed(R.string.tab_feed),
     Channels(R.string.tab_channels),
-    Library(R.string.tab_library)
+    Library(R.string.tab_library),
+    Settings(R.string.tab_settings)
 }

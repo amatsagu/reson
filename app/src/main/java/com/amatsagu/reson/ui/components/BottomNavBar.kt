@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +40,7 @@ fun ResonBottomNavBar(
                 ResonTab.Feed -> Icons.AutoMirrored.Filled.Article
                 ResonTab.Channels -> Icons.Default.Group
                 ResonTab.Library -> Icons.Default.VideoLibrary
+                ResonTab.Settings -> Icons.Default.Settings
             }
             val title = stringResource(tab.titleRes)
 

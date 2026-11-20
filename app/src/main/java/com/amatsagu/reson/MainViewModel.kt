@@ -11,6 +11,9 @@ import com.amatsagu.reson.core.player.AudioPlayerManager
 import com.amatsagu.reson.data.SearchSuggestClient
 import com.amatsagu.reson.data.local.AvatarManager
 import com.amatsagu.reson.data.local.DatabaseManager
+import com.amatsagu.reson.data.local.DatabaseStats
+import com.amatsagu.reson.data.local.ThemeColor
+import com.amatsagu.reson.data.local.UserPreferences
 import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.ResonTab
 import com.amatsagu.reson.model.SearchResultItem
@@ -26,6 +29,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.InputStream
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -151,13 +156,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Dedicated playback state flow to isolate high-frequency position updates from main UI state */
     val audioPlaybackState: StateFlow<com.amatsagu.reson.core.player.PlaybackState> = audioPlayerManager.playbackState
 
+    private val userPreferences = UserPreferences.getInstance(application)
+    val themeColor: StateFlow<ThemeColor> = userPreferences.themeColor
+    val showRecommended: StateFlow<Boolean> = userPreferences.showRecommended
+    val language: StateFlow<String> = userPreferences.language
+    val totalListeningTimeMs: StateFlow<Long> = userPreferences.totalListeningTimeMs
+
+    private val _databaseStats = MutableStateFlow<DatabaseStats?>(null)
+    val databaseStats: StateFlow<DatabaseStats?> = _databaseStats.asStateFlow()
+
     init {
         addLog("App started. Initializing...")
 
+        // Initial database stats load
+        refreshDatabaseStats()
+
         // Progress persistence single worker: consumes updates on bounded Database dispatcher
         viewModelScope.launch(ResonDispatchers.Database) {
+            var lastPositionMs = 0L
             for (update in progressChannel) {
                 databaseManager.savePlaybackProgress(update.videoId, update.positionMs, update.durationMs, notify = false)
+                val delta = update.positionMs - lastPositionMs
+                if (delta in 1L..10_000L) {
+                    userPreferences.addListeningTime(delta)
+                }
+                lastPositionMs = update.positionMs
             }
         }
 
@@ -383,6 +406,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectTab(tab: ResonTab) {
         _uiState.update { it.copy(selectedTab = tab) }
+        if (tab == ResonTab.Settings) {
+            refreshDatabaseStats()
+        }
     }
 
     fun openSearch() {
@@ -925,6 +951,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 addLog("Self-repair completed successfully.")
             } else {
                 addLog("Self-repair failed. Check permissions or network.")
+            }
+        }
+    }
+
+    fun setThemeColor(color: ThemeColor) = userPreferences.setThemeColor(color)
+    fun setShowRecommended(show: Boolean) = userPreferences.setShowRecommended(show)
+    fun setLanguage(lang: String) = userPreferences.setLanguage(lang)
+
+    fun refreshDatabaseStats() {
+        viewModelScope.launch(ResonDispatchers.Database) {
+            _databaseStats.value = databaseManager.getStats()
+        }
+    }
+
+    fun exportDatabase(outputStream: OutputStream, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch(ResonDispatchers.Database) {
+            val result = databaseManager.exportDatabase(outputStream)
+            withContext(ResonDispatchers.Main) {
+                if (result.isSuccess) {
+                    onResult(true, null)
+                } else {
+                    onResult(false, result.exceptionOrNull()?.message)
+                }
+            }
+        }
+    }
+
+    fun importDatabase(inputStream: InputStream, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch(ResonDispatchers.Database) {
+            val result = databaseManager.importDatabase(inputStream)
+            withContext(ResonDispatchers.Main) {
+                if (result.isSuccess) {
+                    refreshDatabaseStats()
+                    onResult(true, null)
+                } else {
+                    onResult(false, result.exceptionOrNull()?.message)
+                }
+            }
+        }
+    }
+
+    fun deleteAllData(onComplete: () -> Unit) {
+        viewModelScope.launch(ResonDispatchers.Database) {
+            closePlayer()
+            databaseManager.clearAll()
+            userPreferences.resetPreferences()
+            withContext(ResonDispatchers.Main) {
+                _uiState.update {
+                    it.copy(
+                        continueVideos = emptyList(),
+                        feedVideos = emptyList(),
+                        channelVideos = emptyList(),
+                        followedChannels = emptySet(),
+                        followedChannelList = emptyList(),
+                        searchResults = emptyList(),
+                        currentPlayingVideo = null
+                    )
+                }
+                refreshDatabaseStats()
+                onComplete()
             }
         }
     }

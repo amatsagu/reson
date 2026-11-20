@@ -88,48 +88,24 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        Log.i(TAG, "Upgrading database from $oldVersion to $newVersion...")
-        if (oldVersion < 2) {
-            db.execSQL("ALTER TABLE channels ADD COLUMN avatar_base64 TEXT NOT NULL DEFAULT ''")
-        }
-        if (oldVersion < 3) {
-            // Rebuild videos table without foreign key constraint so videos from search or un-followed channels persist freely
-            db.execSQL(
-                """
-                CREATE TABLE IF NOT EXISTS videos_temp (
-                    id TEXT PRIMARY KEY,
-                    channel_id TEXT NOT NULL DEFAULT '',
-                    channel_title TEXT NOT NULL DEFAULT '',
-                    title TEXT NOT NULL,
-                    duration_seconds INTEGER NOT NULL DEFAULT 0,
-                    duration_text TEXT NOT NULL DEFAULT '',
-                    release_date_text TEXT NOT NULL DEFAULT '',
-                    release_timestamp INTEGER NOT NULL DEFAULT 0,
-                    thumbnail_url TEXT NOT NULL DEFAULT '',
-                    webpage_url TEXT NOT NULL DEFAULT '',
-                    playback_position_ms INTEGER NOT NULL DEFAULT 0,
-                    playback_duration_ms INTEGER NOT NULL DEFAULT 0,
-                    playback_progress REAL NOT NULL DEFAULT 0.0,
-                    last_played_at INTEGER NOT NULL DEFAULT 0,
-                    is_downloaded INTEGER NOT NULL DEFAULT 0,
-                    download_file_path TEXT DEFAULT NULL,
-                    created_at INTEGER NOT NULL DEFAULT 0
-                )
-                """.trimIndent()
-            )
-            db.execSQL("INSERT OR IGNORE INTO videos_temp SELECT * FROM videos")
-            db.execSQL("DROP TABLE videos")
-            db.execSQL("ALTER TABLE videos_temp RENAME TO videos")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_channel_id ON videos(channel_id)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_last_played ON videos(last_played_at DESC)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_downloaded ON videos(is_downloaded)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_release ON videos(release_timestamp DESC)")
-        }
+        Log.i(TAG, "Recreating database from $oldVersion to $newVersion...")
+        db.execSQL("DROP TABLE IF EXISTS channels")
+        db.execSQL("DROP TABLE IF EXISTS videos")
+        db.execSQL("DROP TABLE IF EXISTS search_history")
+        onCreate(db)
+    }
+
+    override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        Log.i(TAG, "Downgrading database from $oldVersion to $newVersion (wiping & recreating)...")
+        db.execSQL("DROP TABLE IF EXISTS channels")
+        db.execSQL("DROP TABLE IF EXISTS videos")
+        db.execSQL("DROP TABLE IF EXISTS search_history")
+        onCreate(db)
     }
 
     companion object {
         private const val TAG = "Reson:DB"
         const val DATABASE_NAME = "reson.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 1
     }
 }

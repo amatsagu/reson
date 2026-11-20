@@ -5,6 +5,7 @@
     <string name="tab_feed">Feed</string>
     <string name="tab_channels">Channels</string>
     <string name="tab_library">Library</string>
+    <string name="tab_settings">Settings</string>
 
     <!-- Sections (Smart Adaptive) -->
     <string name="section_continue_listening">Continue listening</string>
@@ -79,4 +80,46 @@
     <string name="network_waiting_for_connection">Waiting for internet connection…</string>
     <string name="network_reconnecting">Reconnecting stream…</string>
     <string name="action_dismiss">Dismiss</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_app_details_title">App Details</string>
+    <string name="settings_engine_version">Media Engine</string>
+    <string name="settings_cache_version">Data Format</string>
+    <string name="settings_downloaded_count">Downloaded Locally</string>
+    <string name="settings_total_listening_time">Total Listening Time</string>
+    <string name="settings_self_repair_title">Self-Repair System</string>
+    <string name="settings_self_repair_desc">This will verify media components and restore local data integrity to fix unexpected playback or syncing issues. Continue?</string>
+    <string name="settings_self_repair_confirm">Run Self-Repair</string>
+    <string name="settings_self_repair_cancel">Cancel</string>
+
+    <!-- Data Control -->
+    <string name="settings_data_control_title">Data Control</string>
+    <string name="settings_data_control_subtitle">Backup, restore, or wipe your local data</string>
+    <string name="settings_export_data">Export Data</string>
+    <string name="settings_export_desc">Save a copy of your app data</string>
+    <string name="settings_export_success">Data exported successfully</string>
+    <string name="settings_export_failed">Failed to export data: %1$s</string>
+    <string name="settings_import_data">Import Data</string>
+    <string name="settings_import_desc">Restore your data from a backup file</string>
+    <string name="settings_import_confirm_title">Restore Data?</string>
+    <string name="settings_import_confirm_desc">This will replace your current data with the selected backup file and reload the application. Continue?</string>
+    <string name="settings_import_success">Data restored successfully</string>
+    <string name="settings_import_failed">Failed to restore data: %1$s</string>
+    <string name="settings_delete_all_data">Delete All Data</string>
+    <string name="settings_delete_desc">Wipe all history, followed creators, and caches</string>
+    <string name="settings_delete_confirm_title">Delete All Data?</string>
+    <string name="settings_delete_confirm_desc">This will permanently delete all your playback history, continue listening progress, followed creators, search history, and cached avatars. This action cannot be undone.</string>
+    <string name="settings_delete_confirm_button">Delete Everything</string>
+    <string name="settings_delete_cancel">Cancel</string>
+    <string name="settings_delete_success">All data has been deleted</string>
+
+    <!-- User Preferences -->
+    <string name="settings_preferences_title">User Preferences</string>
+    <string name="settings_preferences_subtitle">Appearance &amp; content curation</string>
+    <string name="settings_theme_color">Theme Accent</string>
+    <string name="settings_show_recommended">Show recommended content</string>
+    <string name="settings_recommended_disabled_title">Recommendations disabled</string>
+    <string name="settings_recommended_disabled_desc">You turned off recommended content. You can re-enable it anytime in Settings.</string>
+    <string name="settings_language">Language</string>
 </resources>

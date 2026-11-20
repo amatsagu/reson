@@ -14,6 +14,11 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 
 /**
  * Statistics snapshot of the SQLite database.
@@ -32,7 +37,7 @@ data class DatabaseStats(
  */
 class DatabaseManager private constructor(private val appContext: Context) {
 
-    private val dbHelper = ResonDatabaseHelper(appContext)
+    private var dbHelper = ResonDatabaseHelper(appContext)
     private val channelDao = ChannelDao()
     private val videoDao = VideoDao()
     private val mutex = Mutex()
@@ -357,6 +362,83 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
         notifyChannelChanged()
         notifyVideoChanged()
+    }
+
+    fun getDatabaseSchemaVersion(): Int = ResonDatabaseHelper.DATABASE_VERSION
+
+    /**
+     * Flushes WAL and exports the SQLite database file to the provided output stream.
+     */
+    suspend fun exportDatabase(outputStream: OutputStream): kotlin.Result<Unit> = withContext(dispatcher) {
+        mutex.withLock {
+            try {
+                val db = dbHelper.writableDatabase
+                db.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { it.moveToFirst() }
+
+                val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
+                if (!dbFile.exists()) {
+                    return@withContext kotlin.Result.failure(IllegalStateException("Database file not found"))
+                }
+
+                FileInputStream(dbFile).use { input ->
+                    input.copyTo(outputStream)
+                }
+                outputStream.flush()
+                kotlin.Result.success(Unit)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to export database", e)
+                kotlin.Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * Validates SQLite magic header, replaces database file, clears WAL/SHM, and reopens helper.
+     */
+    suspend fun importDatabase(inputStream: InputStream): kotlin.Result<Unit> = withContext(dispatcher) {
+        mutex.withLock {
+            val tempFile = File(appContext.cacheDir, "reson_import_temp.db")
+            try {
+                FileOutputStream(tempFile).use { out ->
+                    inputStream.copyTo(out)
+                }
+
+                // Verify SQLite 3 magic header ("SQLite format 3\000")
+                val header = ByteArray(16)
+                FileInputStream(tempFile).use { it.read(header) }
+                val magic = String(header, Charsets.US_ASCII)
+                if (!magic.startsWith("SQLite format 3")) {
+                    tempFile.delete()
+                    return@withContext kotlin.Result.failure(IllegalArgumentException("Selected file is not a valid SQLite database"))
+                }
+
+                // Close existing database and replace files
+                dbHelper.close()
+
+                val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
+                val walFile = File(dbFile.path + "-wal")
+                val shmFile = File(dbFile.path + "-shm")
+
+                if (walFile.exists()) walFile.delete()
+                if (shmFile.exists()) shmFile.delete()
+
+                tempFile.copyTo(dbFile, overwrite = true)
+                tempFile.delete()
+
+                // Re-open and verify schema
+                dbHelper = ResonDatabaseHelper(appContext)
+                val newDb = dbHelper.writableDatabase
+                newDb.rawQuery("SELECT 1", null).use { it.moveToFirst() }
+
+                notifyChannelChanged()
+                notifyVideoChanged()
+                kotlin.Result.success(Unit)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to import database", e)
+                tempFile.delete()
+                kotlin.Result.failure(e)
+            }
+        }
     }
 
     private fun notifyChannelChanged() {
