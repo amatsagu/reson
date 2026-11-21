@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,7 +36,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -102,6 +100,11 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         viewModel.flushPlaybackProgressAndListeningTime(sync = true)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 }
 
@@ -174,6 +177,7 @@ fun ResonApp(viewModel: MainViewModel) {
                             selectedChannelId = uiState.selectedChannelId,
                             videos = uiState.channelVideos,
                             isSyncing = uiState.isSyncingChannels,
+                            isChannelLoading = uiState.isChannelLoading,
                             isChannelLoadingMore = uiState.isChannelLoadingMore,
                             currentPlayingVideoId = uiState.currentPlayingVideo?.id,
                             isPlaybackActive = uiState.isPlaying,
@@ -271,7 +275,6 @@ fun ResonApp(viewModel: MainViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(
     uiState: MainUiState,
@@ -554,13 +557,13 @@ fun RecommendationsDisabledFeedState(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChannelsScreen(
     followedChannels: List<Channel>,
     selectedChannelId: String?,
     videos: List<Video>,
     isSyncing: Boolean,
+    isChannelLoading: Boolean = false,
     isChannelLoadingMore: Boolean,
     currentPlayingVideoId: String? = null,
     isPlaybackActive: Boolean = false,
@@ -601,7 +604,7 @@ fun ChannelsScreen(
             .padding(contentPadding)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (isSyncing) {
+            if (isSyncing || isChannelLoading) {
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()

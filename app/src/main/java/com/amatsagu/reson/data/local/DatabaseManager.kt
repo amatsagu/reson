@@ -128,6 +128,22 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
+     * Updates both avatar URL and base64 for a channel and notifies observers.
+     */
+    suspend fun updateChannelAvatarUrlAndBase64(channelId: String, avatarUrl: String, avatarBase64: String): Boolean = withContext(dispatcher) {
+        val success = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            val updated = channelDao.updateAvatarUrlAndBase64(db, channelId, avatarUrl, avatarBase64)
+            Log.d(TAG, "Updated avatar URL and base64 for channel $channelId: $updated")
+            updated
+        }
+        if (success) {
+            notifyChannelChanged()
+        }
+        success
+    }
+
+    /**
      * Reactive Flow observing followed channels. Re-emits automatically on mutation.
      */
     fun observeFollowedChannels(): Flow<List<Channel>> = flow {
@@ -161,10 +177,13 @@ class DatabaseManager private constructor(private val appContext: Context) {
 
     /**
      * Bulk inserts or updates videos in a single high-performance SQLite transaction.
-     * Silently ignores any locked/supporters-only videos.
+     * Silently ignores any locked/supporters-only videos and shorts.
      */
     suspend fun upsertVideos(videos: List<Video>, defaultChannelId: String = ""): Unit = withContext(dispatcher) {
-        val validVideos = videos.filterNot { com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(it.title) }
+        val validVideos = videos.filterNot { 
+            com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(it.title) ||
+            com.amatsagu.reson.YtDlpManager.isShortVideo(it)
+        }
         if (validVideos.isEmpty()) return@withContext
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -176,10 +195,11 @@ class DatabaseManager private constructor(private val appContext: Context) {
 
     /**
      * Inserts or updates a single video.
-     * Silently ignores any locked/supporters-only video.
+     * Silently ignores any locked/supporters-only video or short.
      */
     suspend fun upsertVideo(video: Video, channelId: String = ""): Unit = withContext(dispatcher) {
-        if (com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(video.title)) return@withContext
+        if (com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(video.title) ||
+            com.amatsagu.reson.YtDlpManager.isShortVideo(video)) return@withContext
         mutex.withLock {
             val db = dbHelper.writableDatabase
             videoDao.upsertVideo(db, video, channelId)
@@ -237,11 +257,17 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val followed = videoDao.getUnwatchedFollowedVideos(db, limit = limit, offset = followedOffset)
         val recommended = videoDao.getRecommendedDiscoveryVideos(db, limit = limit * 2, offset = recOffset)
 
+        val followedIds = channelDao.getFollowedChannelIds(db)
+        val followedChannels = channelDao.getFollowedChannels(db)
+        val followedTitles = followedChannels.map { it.title }.toSet()
+
         val mixed = com.amatsagu.reson.FeedMixer.mix(
             followedUnwatched = followed,
             recommended = recommended,
             excludeIds = excludeIds,
-            limit = limit
+            limit = limit,
+            followedChannelIds = followedIds,
+            followedChannelTitles = followedTitles
         )
 
         if (mixed.isNotEmpty()) {
@@ -492,6 +518,31 @@ class DatabaseManager private constructor(private val appContext: Context) {
             val db = dbHelper.writableDatabase
             videoDao.pruneOldDiscoveryVideos(db, maxDiscoveryCount)
         }
+    }
+
+    /**
+     * Clears unplayed discovery videos (channels not followed) to refresh the discovery pool.
+     */
+    suspend fun clearUnplayedDiscoveryVideos(): Unit = withContext(dispatcher) {
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.clearUnplayedDiscoveryVideos(db)
+        }
+        notifyVideoChanged()
+    }
+
+    /**
+     * Purges all YouTube Shorts from SQLite storage.
+     */
+    suspend fun deleteShortVideos(): Int = withContext(dispatcher) {
+        val deleted = mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.deleteShortVideos(db)
+        }
+        if (deleted > 0) {
+            notifyVideoChanged()
+        }
+        deleted
     }
 
     /**

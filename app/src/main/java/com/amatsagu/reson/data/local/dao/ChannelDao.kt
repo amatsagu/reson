@@ -39,6 +39,14 @@ class ChannelDao {
         return db.update("channels", values, "id = ?", arrayOf(channelId)) > 0
     }
 
+    fun updateAvatarUrlAndBase64(db: SQLiteDatabase, channelId: String, avatarUrl: String, avatarBase64: String): Boolean {
+        val values = ContentValues().apply {
+            if (avatarUrl.isNotBlank()) put("avatar_url", avatarUrl)
+            if (avatarBase64.isNotBlank()) put("avatar_base64", avatarBase64)
+        }
+        return db.update("channels", values, "id = ?", arrayOf(channelId)) > 0
+    }
+
     fun setFollowStatus(
         db: SQLiteDatabase,
         channelId: String,

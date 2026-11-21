@@ -264,6 +264,83 @@ class YtDlpManager private constructor(private val appContext: Context) {
             return regexDelim.containsMatchIn(title)
         }
 
+        private val SHORTS_TITLE_REGEX = "(?i)(?:#shorts?\\b|[\\[(]shorts?[])]<!--|/shorts/|(?:^|[-|•:])\\s*shorts?\\s*(?:$|[-|•:]))".replace("<!--", "").toRegex()
+        private val BIAS_NEWS_AMERICA_REGEX = "(?i)\\b(news|america[ns]?)\\b".toRegex()
+
+        /**
+         * Checks whether a video title indicates a YouTube Short.
+         */
+        fun isShortVideoTitle(title: String): Boolean {
+            if (title.isBlank()) return false
+            return SHORTS_TITLE_REGEX.containsMatchIn(title)
+        }
+
+        /**
+         * Identifies whether a raw video entry from yt-dlp is a YouTube Short,
+         * checking url patterns, title/description tags, tags array, and duration <= 60 seconds.
+         */
+        fun isShortVideo(json: org.json.JSONObject): Boolean {
+            val url = json.optCleanString("url")
+            val webpageUrl = json.optCleanString("webpage_url")
+            val originalUrl = json.optCleanString("original_url")
+            if (url.contains("/shorts/") || webpageUrl.contains("/shorts/") || originalUrl.contains("/shorts/")) {
+                return true
+            }
+
+            val title = json.optCleanString("title")
+            if (isShortVideoTitle(title)) {
+                return true
+            }
+
+            val desc = json.optCleanString("description")
+            if (desc.isNotEmpty() && isShortVideoTitle(desc)) {
+                return true
+            }
+
+            val tags = json.optJSONArray("tags")
+            if (tags != null) {
+                for (i in 0 until tags.length()) {
+                    val tag = tags.optString(i).trim().lowercase()
+                    if (tag == "shorts" || tag == "short" || tag == "#shorts" || tag == "#short") {
+                        return true
+                    }
+                }
+            }
+
+            val duration = json.optInt("duration", 0)
+            if (duration in 1..60) {
+                return true
+            }
+
+            return false
+        }
+
+        /**
+         * Checks if a domain Video object is a YouTube Short.
+         */
+        fun isShortVideo(video: Video): Boolean {
+            if (isShortVideoTitle(video.title)) return true
+            if (video.webpageUrl.contains("/shorts/")) return true
+            if (video.durationSeconds in 1..60) return true
+            return false
+        }
+
+        /**
+         * Checks whether a channel or video has a hidden bias towards 'news' or 'america'.
+         * Returns false if the channel is followed.
+         */
+        fun hasNewsOrAmericaBias(
+            title: String,
+            channelTitle: String = "",
+            handle: String = "",
+            isFollowed: Boolean = false
+        ): Boolean {
+            if (isFollowed) return false
+            return BIAS_NEWS_AMERICA_REGEX.containsMatchIn(title) ||
+                    BIAS_NEWS_AMERICA_REGEX.containsMatchIn(channelTitle) ||
+                    BIAS_NEWS_AMERICA_REGEX.containsMatchIn(handle)
+        }
+
         /**
          * Formats release date into compact relative time to save space:
          * e.g. "57m ago", "1d3h ago", "3d ago", "2w ago", "4mo ago", "2y ago".
@@ -422,11 +499,13 @@ class YtDlpManager private constructor(private val appContext: Context) {
         fun filterAndRankChannels(
             query: String,
             channels: List<Channel>,
-            videos: List<Video>
+            videos: List<Video>,
+            followedIds: Set<String> = emptySet()
         ): List<Channel> {
             val qNorm = query.lowercase().filter { it.isLetterOrDigit() }
 
             val scored = channels.mapNotNull { ch ->
+                val isFollowed = ch.isFollowed || ch.id in followedIds
                 val isExactHandle = isHandleExactMatch(query, ch.handle)
                 val similarity = calculateSimilarity(query, ch.title, ch.handle)
                 if (similarity < 0.45) return@mapNotNull null
@@ -453,7 +532,11 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
                 val subScore = log10(ch.subscriberCount.coerceAtLeast(100L).toDouble())
                 val bonus = if (titleOrHandleContainsQuery) 2.5 else 0.0
-                val totalScore = (similarity * 10.0) + subScore + (if (hasRecentVideo) 3.0 else 0.0) + bonus
+
+                // Hidden bias: lower priority if title or handle contains "news" or "america" (unless followed)
+                val biasPenalty = if (!isFollowed && hasNewsOrAmericaBias(ch.title, handle = ch.handle)) 15.0 else 0.0
+
+                val totalScore = (similarity * 10.0) + subScore + (if (hasRecentVideo) 3.0 else 0.0) + bonus - biasPenalty
 
                 ch to totalScore
             }
@@ -463,15 +546,34 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
         /**
          * Combines videos and channels into a single unified search list up to maxTotal (default 30).
+         * Automatically filters out shorts and demotes non-followed items with "news" or "america".
          */
         fun mergeSearchResults(
             videos: List<Video>,
             channels: List<Channel>,
-            maxTotal: Int = 30
+            maxTotal: Int = 30,
+            followedChannelIds: Set<String> = emptySet(),
+            followedChannelTitles: Set<String> = emptySet()
         ): List<SearchResultItem> {
+            // Filter out shorts
+            val nonShortVideos = videos.filterNot { isShortVideo(it) }
+
+            // Hidden bias: rank non-followed items with "news" or "america" lower
+            val (unbiasedVideos, biasedVideos) = nonShortVideos.partition { v ->
+                val isFollowed = v.channelId in followedChannelIds || v.channelTitle in followedChannelTitles
+                isFollowed || !hasNewsOrAmericaBias(v.title, v.channelTitle)
+            }
+            val orderedVideos = unbiasedVideos + biasedVideos
+
+            val (unbiasedChannels, biasedChannels) = channels.partition { ch ->
+                val isFollowed = ch.isFollowed || ch.id in followedChannelIds
+                isFollowed || !hasNewsOrAmericaBias(ch.title, handle = ch.handle)
+            }
+            val orderedChannels = unbiasedChannels + biasedChannels
+
             val result = mutableListOf<SearchResultItem>()
-            val videoIter = videos.iterator()
-            val channelIter = channels.iterator()
+            val videoIter = orderedVideos.iterator()
+            val channelIter = orderedChannels.iterator()
 
             if (videoIter.hasNext()) {
                 result.add(SearchResultItem.Video(videoIter.next()))
@@ -1202,9 +1304,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
                     try {
                         val json = org.json.JSONObject(jsonLine)
-                        // Silently drop locked/supporters-only/members-only/paywalled videos
-                        if (isLockedVideo(json)) {
-                            Log.d(TAG, "Silently dropping locked/supporters-only video: ${json.optCleanString("id")}")
+                        // Silently drop locked/supporters-only/members-only/paywalled videos and shorts
+                        if (isLockedVideo(json) || isShortVideo(json)) {
+                            Log.d(TAG, "Silently dropping locked/short video: ${json.optCleanString("id")}")
                             continue
                         }
 

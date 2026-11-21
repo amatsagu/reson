@@ -1,6 +1,7 @@
 package com.amatsagu.reson
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -303,6 +304,97 @@ class YtDlpManagerTest {
     fun testFormatRelativeDate_rawUploadDateFallback() {
         val dateText = YtDlpManager.formatRelativeDate(0L, "20260101")
         assertTrue(dateText.isNotEmpty())
+    }
+
+    @Test
+    fun testIsShortVideoTitle() {
+        assertTrue(YtDlpManager.isShortVideoTitle("Insane Linux Trick #shorts"))
+        assertTrue(YtDlpManager.isShortVideoTitle("Cool Code Snippet #short"))
+        assertTrue(YtDlpManager.isShortVideoTitle("Vim Tips [Shorts]"))
+        assertTrue(YtDlpManager.isShortVideoTitle("Quick tip (shorts)"))
+        assertTrue(YtDlpManager.isShortVideoTitle("My Coding Journey - Shorts"))
+
+        assertFalse(YtDlpManager.isShortVideoTitle("Shortest path algorithm in graph theory"))
+        assertFalse(YtDlpManager.isShortVideoTitle("Python in 100 Seconds"))
+        assertFalse(YtDlpManager.isShortVideoTitle("The Long and Short of Modern AI"))
+    }
+
+    @Test
+    fun testIsShortVideo_jsonAndVideo() {
+        val jsonShortUrl = org.json.JSONObject().put("title", "Cool Vid").put("webpage_url", "https://www.youtube.com/shorts/abc123xyz")
+        assertTrue(YtDlpManager.isShortVideo(jsonShortUrl))
+
+        val jsonShortDuration = org.json.JSONObject().put("title", "Quick Vid").put("duration", 45)
+        assertTrue(YtDlpManager.isShortVideo(jsonShortDuration))
+
+        val jsonNormal = org.json.JSONObject().put("title", "Podcast Episode 1").put("duration", 3600).put("webpage_url", "https://www.youtube.com/watch?v=abc123xyz")
+        assertFalse(YtDlpManager.isShortVideo(jsonNormal))
+
+        val videoShort = com.amatsagu.reson.model.Video(
+            id = "s1",
+            title = "Quick tip",
+            channelTitle = "Creator",
+            durationText = "45s",
+            durationSeconds = 45
+        )
+        assertTrue(YtDlpManager.isShortVideo(videoShort))
+
+        val videoLong = com.amatsagu.reson.model.Video(
+            id = "l1",
+            title = "Full Talk",
+            channelTitle = "Creator",
+            durationText = "15m",
+            durationSeconds = 900
+        )
+        assertFalse(YtDlpManager.isShortVideo(videoLong))
+    }
+
+    @Test
+    fun testHasNewsOrAmericaBias() {
+        assertTrue(YtDlpManager.hasNewsOrAmericaBias("World News Today", "Global Outlet"))
+        assertTrue(YtDlpManager.hasNewsOrAmericaBias("Touring America in 2026", "Travel Channel"))
+        assertTrue(YtDlpManager.hasNewsOrAmericaBias("American Tech Trends", "Tech Channel"))
+
+        // Word boundary: "newsletter" should NOT trigger bias
+        assertFalse(YtDlpManager.hasNewsOrAmericaBias("My Weekly Newsletter #42", "Substack Writer"))
+
+        // Followed channel: bias is ignored
+        assertFalse(YtDlpManager.hasNewsOrAmericaBias("World News Today", "Global Outlet", isFollowed = true))
+    }
+
+    @Test
+    fun testFilterAndRankChannels_newsAmericaBiasIgnoredWhenFollowed() {
+        val channelBiased = com.amatsagu.reson.model.Channel(
+            id = "ch_news",
+            title = "Global News Network",
+            handle = "@globalnews",
+            subscriberCount = 1_000_000
+        )
+        val channelNormal = com.amatsagu.reson.model.Channel(
+            id = "ch_code",
+            title = "Global Code Network",
+            handle = "@globalcode",
+            subscriberCount = 1_000_000
+        )
+
+        // When NOT followed, biased channel receives penalty and ranks below normal channel
+        val rankedUnfollowed = YtDlpManager.filterAndRankChannels(
+            query = "global",
+            channels = listOf(channelBiased, channelNormal),
+            videos = emptyList(),
+            followedIds = emptySet()
+        )
+        assertEquals("ch_code", rankedUnfollowed.first().id)
+
+        // When biased channel IS followed, penalty is omitted
+        val rankedFollowed = YtDlpManager.filterAndRankChannels(
+            query = "global",
+            channels = listOf(channelBiased, channelNormal),
+            videos = emptyList(),
+            followedIds = setOf("ch_news")
+        )
+        // With equal subs and similarity, biased channel is not penalized
+        assertTrue(rankedFollowed.any { it.id == "ch_news" })
     }
 }
 

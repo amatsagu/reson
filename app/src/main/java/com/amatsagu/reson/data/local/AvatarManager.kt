@@ -20,6 +20,39 @@ object AvatarManager {
     private const val MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024 // 5 MB safety bound
 
     /**
+     * Resolves the channel avatar image URL by inspecting the channel's public og:image meta tag.
+     */
+    suspend fun fetchChannelAvatarUrl(channelId: String): String? = withContext(ResonDispatchers.Network) {
+        val cleanId = channelId.trim()
+        if (cleanId.isEmpty() || !cleanId.startsWith("UC")) return@withContext null
+
+        var connection: HttpURLConnection? = null
+        try {
+            val url = URL("https://www.youtube.com/channel/$cleanId")
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6_000
+                readTimeout = 6_000
+                instanceFollowRedirects = true
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            }
+            if (connection.responseCode in 200..299) {
+                val html = connection.inputStream.bufferedReader().use { it.readText() }
+                val match = Regex("""<meta property="og:image" content="([^"]+)"""").find(html)
+                match?.groupValues?.get(1)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed resolving avatar for $cleanId: ${e.message}")
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /**
      * Downloads an avatar from the given URL and converts it into a Base64 string.
      * Automatically downscales images larger than 160px to preserve minimal SQLite storage.
      */

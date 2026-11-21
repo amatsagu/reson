@@ -94,4 +94,96 @@ class FeedMixerTest {
         assertEquals(4, mixed.size)
         assertTrue(mixed.all { it.id.startsWith("f") })
     }
+
+    @Test
+    fun testDynamicTopicExtractor_compoundTitle() {
+        val video = createTestVideo("1", "c1", "Mitchell Hashimoto Reinvents the Terminal... Again | Standup #80")
+        val channel = com.amatsagu.reson.model.Channel(id = "c1", title = "TheStandupPod")
+        val query = DynamicTopicExtractor.extractSearchQuery(video, channel)
+        assertTrue("Expected topic query to contain Mitchell Hashimoto Terminal, got '$query'",
+            query?.contains("Mitchell Hashimoto", ignoreCase = true) == true)
+        assertFalse("Expected channel/series noise stripped, got '$query'",
+            query?.contains("Standup", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun testDynamicTopicExtractor_conversationalTitle() {
+        val video = createTestVideo("2", "c2", "So, Apple Intelligence is Kinda Broken Right Now")
+        val channel = com.amatsagu.reson.model.Channel(id = "c2", title = "SAMTIME")
+        val query = DynamicTopicExtractor.extractSearchQuery(video, channel)
+        assertTrue("Expected topic query to contain Apple Intelligence, got '$query'",
+            query?.contains("Apple Intelligence", ignoreCase = true) == true)
+        assertFalse("Expected leading conversational filler 'So' stripped, got '$query'",
+            query?.startsWith("So", ignoreCase = true) == true)
+    }
+
+    @Test
+    fun testDynamicTopicExtractor_polishTitle() {
+        val video = createTestVideo("3", "c3", "3 MITY O WYPALENIU")
+        val channel = com.amatsagu.reson.model.Channel(id = "c3", title = "Nauka. To Lubię")
+        val query = DynamicTopicExtractor.extractSearchQuery(video, channel)
+        assertTrue("Expected Polish topic keywords preserved, got '$query'",
+            query?.contains("WYPALENIU", ignoreCase = true) == true && query.contains("MITY", ignoreCase = true))
+    }
+
+    @Test
+    fun testMix_filtersOutShortsEverywhere() {
+        val normalFollowed = createTestVideo("f1", "FollowedCh", "Normal Followed Video")
+        val shortFollowed = Video(
+            id = "f_short",
+            channelId = "FollowedCh",
+            channelTitle = "FollowedCh",
+            title = "Quick hack #shorts",
+            durationText = "30s",
+            durationSeconds = 30
+        )
+        val normalRec = createTestVideo("r1", "RecCh", "Normal Recommended Video")
+        val shortRec = Video(
+            id = "r_short",
+            channelId = "RecCh",
+            channelTitle = "RecCh",
+            title = "Another tip #short",
+            durationText = "45s",
+            durationSeconds = 45
+        )
+
+        val mixed = FeedMixer.mix(
+            followedUnwatched = listOf(normalFollowed, shortFollowed),
+            recommended = listOf(normalRec, shortRec),
+            limit = 10
+        )
+
+        assertFalse(mixed.any { it.id == "f_short" })
+        assertFalse(mixed.any { it.id == "r_short" })
+        assertEquals(2, mixed.size)
+    }
+
+    @Test
+    fun testMix_newsAndAmericaBiasDemotion_andIgnoredWhenFollowed() {
+        // Biased non-followed channel: "Global News"
+        val biasedRec1 = createTestVideo("r_news1", "Global News", "Morning News Headline")
+        val biasedRec2 = createTestVideo("r_us1", "America Live", "Discovering America")
+        // Unbiased non-followed channel: "Tech Insights"
+        val unbiasedRec = createTestVideo("r_tech1", "Tech Insights", "Writing a Compiler in Rust")
+
+        // 1. When non-followed, unbiased recommendation is picked first
+        val mixedUnfollowed = FeedMixer.mix(
+            followedUnwatched = emptyList(),
+            recommended = listOf(biasedRec1, biasedRec2, unbiasedRec),
+            limit = 1
+        )
+        assertEquals("r_tech1", mixedUnfollowed.first().id)
+
+        // 2. When a channel with "News" IS followed, bias is completely ignored
+        val followedNewsVideo = createTestVideo("f_news1", "Tech News Daily", "Tech News Episode 100")
+        val mixedFollowed = FeedMixer.mix(
+            followedUnwatched = listOf(followedNewsVideo),
+            recommended = listOf(unbiasedRec),
+            followedChannelIds = setOf("Tech News Daily"),
+            limit = 2
+        )
+        // Followed news video is placed in slot 0 as expected
+        assertEquals("f_news1", mixedFollowed.first().id)
+    }
 }
+

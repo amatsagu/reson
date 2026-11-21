@@ -62,6 +62,8 @@ class VideoDao {
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
             WHERE c.is_followed = 1
+              AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+              AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
@@ -82,6 +84,8 @@ class VideoDao {
             WHERE c.is_followed = 1
               AND v.last_played_at = 0
               AND v.playback_progress = 0
+              AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+              AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
@@ -90,6 +94,7 @@ class VideoDao {
 
     /**
      * Fetches recommended discovery videos (channels NOT followed) that have not been watched yet.
+     * Hidden bias: Sorts videos/channels without "news" or "america" before biased ones.
      */
     fun getRecommendedDiscoveryVideos(
         db: SQLiteDatabase,
@@ -102,7 +107,16 @@ class VideoDao {
             WHERE (c.is_followed IS NULL OR c.is_followed = 0)
               AND v.last_played_at = 0
               AND v.playback_progress = 0
-            ORDER BY v.created_at DESC, v.release_timestamp DESC
+              AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+              AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
+            ORDER BY 
+              CASE 
+                WHEN LOWER(v.title) LIKE '%news%' OR LOWER(v.title) LIKE '%america%' 
+                     OR LOWER(v.channel_title) LIKE '%news%' OR LOWER(v.channel_title) LIKE '%america%' 
+                THEN 1 
+                ELSE 0 
+              END ASC,
+              v.created_at DESC, v.release_timestamp DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
         return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
@@ -121,7 +135,7 @@ class VideoDao {
     }
 
     fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 30, offset: Int = 0): List<Video> {
-        val query = "SELECT * FROM videos WHERE channel_id = ? ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
+        val query = "SELECT * FROM videos WHERE channel_id = ? AND (duration_seconds = 0 OR duration_seconds > 60) AND title NOT LIKE '%#shorts%' AND title NOT LIKE '%#short%' AND webpage_url NOT LIKE '%/shorts/%' ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
         return queryVideos(db, query, arrayOf(channelId, limit.toString(), offset.toString()))
     }
 
@@ -143,6 +157,8 @@ class VideoDao {
                 FROM videos v
                 INNER JOIN channels c ON v.channel_id = c.id
                 WHERE c.is_followed = 1
+                  AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+                  AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ) v
             WHERE v.rn <= ?
             ORDER BY v.release_timestamp DESC, v.created_at DESC
@@ -247,8 +263,11 @@ class VideoDao {
               AND v.last_played_at = 0
               AND v.playback_progress = 0
               AND v.playback_position_ms = 0
-              AND v.channel_id NOT IN (SELECT id FROM channels WHERE is_followed = 1)
-              AND v.channel_title NOT IN (SELECT title FROM channels WHERE is_followed = 1)
+              AND NOT EXISTS (
+                  SELECT 1 FROM channels c 
+                  WHERE c.is_followed = 1 
+                    AND (c.id = v.channel_id OR (c.title IS NOT NULL AND c.title = v.channel_title))
+              )
         """.trimIndent()
 
         val totalUnplayedDiscovery = db.rawQuery(countQuery, null).use { cursor ->
@@ -268,13 +287,44 @@ class VideoDao {
                   AND v.last_played_at = 0
                   AND v.playback_progress = 0
                   AND v.playback_position_ms = 0
-                  AND v.channel_id NOT IN (SELECT id FROM channels WHERE is_followed = 1)
-                  AND v.channel_title NOT IN (SELECT title FROM channels WHERE is_followed = 1)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM channels c 
+                      WHERE c.is_followed = 1 
+                        AND (c.id = v.channel_id OR (c.title IS NOT NULL AND c.title = v.channel_title))
+                  )
                 ORDER BY v.created_at ASC
                 LIMIT ?
             )
         """.trimIndent()
         db.execSQL(deleteQuery, arrayOf(toDeleteCount.toString()))
+    }
+
+    /**
+     * Clears all unplayed, non-downloaded discovery videos from non-followed channels.
+     */
+    fun clearUnplayedDiscoveryVideos(db: SQLiteDatabase) {
+        val deleteQuery = """
+            DELETE FROM videos
+            WHERE is_downloaded = 0
+              AND download_file_path IS NULL
+              AND last_played_at = 0
+              AND playback_progress = 0
+              AND playback_position_ms = 0
+              AND NOT EXISTS (
+                  SELECT 1 FROM channels c 
+                  WHERE c.is_followed = 1 
+                    AND (c.id = videos.channel_id OR (c.title IS NOT NULL AND c.title = videos.channel_title))
+              )
+        """.trimIndent()
+        db.execSQL(deleteQuery)
+    }
+
+    /**
+     * Purges all YouTube Shorts from SQLite storage.
+     */
+    fun deleteShortVideos(db: SQLiteDatabase): Int {
+        val where = "(duration_seconds > 0 AND duration_seconds <= 60) OR title LIKE '%#shorts%' OR title LIKE '%#short%' OR webpage_url LIKE '%/shorts/%'"
+        return db.delete("videos", where, null)
     }
 
     fun updateDownloadStatus(db: SQLiteDatabase, videoId: String, isDownloaded: Boolean, filePath: String?): Boolean {

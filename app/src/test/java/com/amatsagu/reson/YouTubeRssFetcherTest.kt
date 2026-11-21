@@ -44,6 +44,21 @@ class YouTubeRssFetcherTest {
           </media:group>
          </entry>
          <entry>
+          <id>yt:video:short123</id>
+          <yt:videoId>short123</yt:videoId>
+          <yt:channelId>UCWFKCr40YwOZQx8FHU_ZqqQ</yt:channelId>
+          <title>Durability Test in 30s #shorts</title>
+          <link rel="alternate" href="https://www.youtube.com/watch?v=short123"/>
+          <author>
+           <name>JerryRigEverything</name>
+          </author>
+          <published>2026-11-09T19:12:05+00:00</published>
+          <media:group>
+           <media:title>Durability Test in 30s #shorts</media:title>
+           <media:thumbnail url="https://i4.ytimg.com/vi/short123/hqdefault.jpg" width="480" height="360"/>
+          </media:group>
+         </entry>
+         <entry>
           <id>yt:video:FDNbcfMaF6o</id>
           <yt:videoId>FDNbcfMaF6o</yt:videoId>
           <yt:channelId>UCWFKCr40YwOZQx8FHU_ZqqQ</yt:channelId>
@@ -66,7 +81,7 @@ class YouTubeRssFetcherTest {
         val stream = ByteArrayInputStream(sampleAtomXml.toByteArray(Charsets.UTF_8))
         val videos = YouTubeRssFetcher.parseAtomFeed(stream, "UCWFKCr40YwOZQx8FHU_ZqqQ", "JerryRigEverything")
 
-        // 3 entries in XML, but 1 is [Members Only] which must be silently dropped
+        // 4 entries in XML: 1 is [Members Only], 1 is #shorts, so only 2 standard videos remain
         assertEquals(2, videos.size)
 
         val v1 = videos[0]
@@ -89,6 +104,15 @@ class YouTubeRssFetcherTest {
 
         val titles = videos.map { it.title }
         assertFalse(titles.any { it.contains("Members Only", ignoreCase = true) })
+    }
+
+    @Test
+    fun testParseAtomFeed_filtersShortsVideos() {
+        val stream = ByteArrayInputStream(sampleAtomXml.toByteArray(Charsets.UTF_8))
+        val videos = YouTubeRssFetcher.parseAtomFeed(stream, "UCWFKCr40YwOZQx8FHU_ZqqQ", "JerryRigEverything")
+
+        val titles = videos.map { it.title }
+        assertFalse(titles.any { it.contains("#shorts", ignoreCase = true) })
     }
 
     @Test

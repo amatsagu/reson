@@ -84,6 +84,7 @@ data class MainUiState(
     val canLoadMoreFeed: Boolean = true,
     val isContinueLoadingMore: Boolean = false,
     val canLoadMoreContinue: Boolean = true,
+    val isChannelLoading: Boolean = false,
     val isChannelLoadingMore: Boolean = false,
     val canLoadMoreChannelVideos: Boolean = true,
     val isSearchLoadingMore: Boolean = false,
@@ -204,10 +205,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // Initial database stats load and clean missing offline files
+        // Initial database stats load and clean missing offline files / purge shorts
         refreshDatabaseStats()
         viewModelScope.launch(ResonDispatchers.Database) {
             databaseManager.syncDownloadedState()
+            databaseManager.deleteShortVideos()
         }
 
         // Progress persistence single worker: consumes updates on bounded Database dispatcher
@@ -577,13 +579,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     val followed = _uiState.value.followedChannels
+                    val followedChannelsList = databaseManager.getFollowedChannels()
+                    val followedTitles = followedChannelsList.map { it.title.lowercase().trim() }.toSet()
 
                     // Filter out random channels and rank by similarity, subs & activity on Default dispatcher
                     val (filteredChannels, mergedResults) = withContext(ResonDispatchers.Computation) {
                         val filtered = YtDlpManager.filterAndRankChannels(
                             query = trimmed,
                             channels = rawChannels,
-                            videos = rawVideos
+                            videos = rawVideos,
+                            followedIds = followed
                         ).map { ch ->
                             ch.copy(isFollowed = followed.contains(ch.id))
                         }
@@ -591,7 +596,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val merged = YtDlpManager.mergeSearchResults(
                             videos = rawVideos,
                             channels = filtered,
-                            maxTotal = 30
+                            maxTotal = 30,
+                            followedChannelIds = followed,
+                            followedChannelTitles = followedTitles
                         )
                         filtered to merged
                     }
@@ -630,43 +637,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 selectedChannelId = channelId,
                 canLoadMoreChannelVideos = true,
-                isChannelLoadingMore = false
+                isChannelLoadingMore = false,
+                isChannelLoading = true
             )
         }
         channelFilterJob?.cancel()
         channelFilterJob = viewModelScope.launch(ResonDispatchers.Database) {
-            val videos = if (channelId == null) {
-                databaseManager.getVideosFromFollowedWithinMonth(limit = PAGE_SIZE, offset = 0)
-            } else {
-                val cached = databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
-                if (cached.size < PAGE_SIZE) {
-                    val ch = _uiState.value.followedChannelList.find { it.id == channelId }
-                        ?: databaseManager.getFollowedChannels().find { it.id == channelId }
-                    val result = withContext(ResonDispatchers.Network) {
-                        ytDlpManager.fetchChannelVideos(
-                            channelId = channelId,
-                            handle = ch?.handle.orEmpty(),
-                            channelTitle = ch?.title.orEmpty(),
-                            startIndex = 1,
-                            maxResults = PAGE_SIZE
-                        )
-                    }
-                    if (result is Result.Success && result.data.isNotEmpty()) {
-                        databaseManager.upsertVideos(result.data, defaultChannelId = channelId)
-                        databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
+            try {
+                val videos = if (channelId == null) {
+                    databaseManager.getVideosFromFollowedWithinMonth(limit = PAGE_SIZE, offset = 0)
+                } else {
+                    val cached = databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
+                    if (cached.size < PAGE_SIZE) {
+                        val ch = _uiState.value.followedChannelList.find { it.id == channelId }
+                            ?: databaseManager.getFollowedChannels().find { it.id == channelId }
+                        val result = withContext(ResonDispatchers.Network) {
+                            ytDlpManager.fetchChannelVideos(
+                                channelId = channelId,
+                                handle = ch?.handle.orEmpty(),
+                                channelTitle = ch?.title.orEmpty(),
+                                startIndex = 1,
+                                maxResults = PAGE_SIZE
+                            )
+                        }
+                        if (result is Result.Success && result.data.isNotEmpty()) {
+                            databaseManager.upsertVideos(result.data, defaultChannelId = channelId)
+                            databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
+                        } else {
+                            cached
+                        }
                     } else {
                         cached
                     }
-                } else {
-                    cached
                 }
+                val canLoadMore = if (channelId == null) {
+                    videos.size >= PAGE_SIZE
+                } else {
+                    videos.isNotEmpty()
+                }
+                _uiState.update { it.copy(channelVideos = videos, canLoadMoreChannelVideos = canLoadMore) }
+            } finally {
+                _uiState.update { it.copy(isChannelLoading = false) }
             }
-            val canLoadMore = if (channelId == null) {
-                videos.size >= PAGE_SIZE
-            } else {
-                videos.isNotEmpty()
-            }
-            _uiState.update { it.copy(channelVideos = videos, canLoadMoreChannelVideos = canLoadMore) }
         }
     }
 
@@ -846,9 +858,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val newVideos = result.data
                     _uiState.update { current ->
                         val existingIds = current.searchResults.map { it.id }.toSet()
-                        val newUniqueItems = newVideos
-                            .filter { !existingIds.contains("video_${it.id}") }
-                            .map { SearchResultItem.Video(it) }
+                        val followed = current.followedChannels
+                        val cleanVideos = newVideos.filterNot { 
+                            existingIds.contains("video_${it.id}") || YtDlpManager.isShortVideo(it) 
+                        }
+                        val (unbiasedVideos, biasedVideos) = cleanVideos.partition { v ->
+                            val isFollowed = followed.contains(v.channelId)
+                            isFollowed || !YtDlpManager.hasNewsOrAmericaBias(v.title, v.channelTitle)
+                        }
+                        val newUniqueItems = (unbiasedVideos + biasedVideos).map { SearchResultItem.Video(it) }
 
                         current.copy(
                             searchResults = current.searchResults + newUniqueItems,
@@ -977,10 +995,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     async {
                         semaphore.withPermit {
                             // Ensure avatar is cached
-                            if (ch.avatarBase64.isBlank() && ch.avatarUrl.isNotBlank()) {
-                                val base64 = AvatarManager.downloadAvatarAsBase64(ch.avatarUrl)
-                                if (!base64.isNullOrBlank()) {
-                                    databaseManager.updateChannelAvatarBase64(ch.id, base64)
+                            if (ch.avatarBase64.isBlank()) {
+                                val avatarUrl = if (ch.avatarUrl.isNotBlank()) {
+                                    ch.avatarUrl
+                                } else {
+                                    AvatarManager.fetchChannelAvatarUrl(ch.id)
+                                }
+                                if (!avatarUrl.isNullOrBlank()) {
+                                    val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
+                                    if (!base64.isNullOrBlank()) {
+                                        databaseManager.updateChannelAvatarUrlAndBase64(ch.id, avatarUrl, base64)
+                                    }
                                 }
                             }
 
@@ -1041,11 +1066,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var discoveryVariant = 0
 
     /**
-     * Replenishes the discovery video pool in SQLite using rotating seeds from followed channels.
-     * Searches for collaborations, podcasts, interviews, and peer creator topics to discover
-     * recommended videos from other channels in the same ecosystem.
+     * Replenishes the discovery video pool in SQLite using dynamically extracted topic keywords
+     * and exact creator references from followed channels and watch history.
      */
     suspend fun replenishDiscoveryFeedIfNeeded(force: Boolean = false) = withContext(ResonDispatchers.Database) {
+        if (force) {
+            databaseManager.clearUnplayedDiscoveryVideos()
+        }
+
         val unplayedDiscoveryCount = databaseManager.getRecommendedDiscoveryVideos(limit = 40, offset = 0).size
         if (!force && unplayedDiscoveryCount >= 30) return@withContext
 
@@ -1061,42 +1089,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         discoverySeedIndex = (discoverySeedIndex + 1) % followedChannels.size
         val currentVariant = discoveryVariant++
 
-        // Generate smart discovery search queries that return OTHER creators
+        // 1. Fetch recent videos from watch history and followed seeds to derive dynamic topics
+        val historyVideos = databaseManager.getPlaybackHistory(limit = 10)
+        val seed1Videos = databaseManager.getVideosForChannel(seed1.id, limit = 5, offset = 0)
+        val seed2Videos = if (seed1.id != seed2.id) {
+            databaseManager.getVideosForChannel(seed2.id, limit = 5, offset = 0)
+        } else {
+            emptyList()
+        }
+
+        val topicFromHistory = historyVideos.firstNotNullOfOrNull { video -> DynamicTopicExtractor.extractSearchQuery(video) }
+        val topicFromSeed1 = seed1Videos.firstNotNullOfOrNull { video -> DynamicTopicExtractor.extractSearchQuery(video, seed1) }
+        val topicFromSeed2 = seed2Videos.firstNotNullOfOrNull { video -> DynamicTopicExtractor.extractSearchQuery(video, seed2) }
+
+        // 2. Build focused search queries dynamically
         val query1: String
         val query2: String
 
-        if (seed1.id != seed2.id) {
-            // Multiple followed channels: sample collaborators / podcasts across both
-            query1 = if (currentVariant % 2 == 0) "${seed1.title} collab" else "${seed1.title} podcast"
-            query2 = if (currentVariant % 2 == 0) "${seed2.title} podcast" else "${seed2.title} collab"
-        } else {
-            // Single followed channel: diversify between collabs, podcasts, and video topic queries
-            when (currentVariant % 3) {
-                0 -> {
-                    query1 = "${seed1.title} collab"
-                    query2 = "${seed1.title} podcast"
-                }
-                1 -> {
-                    // Extract topic words from a recent upload to find peer creators covering same subject
-                    val seedVideos = databaseManager.getVideosForChannel(seed1.id, limit = 5, offset = 0)
-                    val sampleVideo = seedVideos.firstOrNull { it.title.length > 5 }
-                    val cleanTopic = if (sampleVideo != null) {
-                        sampleVideo.title
-                            .replace(Regex("(?i)\\b${Regex.escape(seed1.title)}\\b"), "")
-                            .replace(Regex("[^a-zA-Z0-9 ]"), " ")
-                            .trim()
-                            .split(Regex("\\s+"))
-                            .filter { it.length > 2 }
-                            .take(4)
-                            .joinToString(" ")
-                    } else ""
-                    query1 = cleanTopic.ifEmpty { "${seed1.title} interview" }
-                    query2 = "${seed1.title} podcast"
-                }
-                else -> {
-                    query1 = "${seed1.title} interview"
-                    query2 = "${seed1.title} with"
-                }
+        when (currentVariant % 3) {
+            0 -> {
+                // Focus on current video topics from history or followed uploads
+                query1 = topicFromHistory ?: topicFromSeed1 ?: "\"${seed1.title}\""
+                query2 = topicFromSeed2 ?: topicFromSeed1 ?: "\"${seed2.title}\""
+            }
+            1 -> {
+                // Mix between a dynamic topic and an exact creator collaboration/interview
+                query1 = topicFromSeed1 ?: topicFromHistory ?: "\"${seed1.title}\""
+                query2 = if (seed2.title.isNotBlank()) "\"${seed2.title}\" interview" else "\"${seed1.title}\""
+            }
+            else -> {
+                // Mix between a creator appearance and a second creator topic
+                query1 = if (seed1.title.isNotBlank()) "\"${seed1.title}\" guest" else "\"${seed2.title}\""
+                query2 = topicFromSeed2 ?: topicFromHistory ?: "\"${seed2.title}\""
             }
         }
 
@@ -1114,16 +1138,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val res1 = (d1.await() as? Result.Success)?.data.orEmpty()
             val res2 = (d2.await() as? Result.Success)?.data.orEmpty()
 
-            val candidates = (res1 + res2).filterNot {
-                it.channelId in followedIds ||
-                it.channelTitle.lowercase().trim() in followedTitles ||
-                YtDlpManager.isLockedVideoTitle(it.title)
+            fun filterRelevant(candidates: List<Video>, query: String): List<Video> {
+                val queryTokens = query.replace("\"", "")
+                    .split(Regex("\\s+"))
+                    .map { it.lowercase().trim() }
+                    .filter { it.length >= 3 && it !in setOf("collab", "interview", "guest", "with", "podcast") }
+
+                return candidates.filterNot {
+                    it.channelId in followedIds ||
+                    it.channelTitle.lowercase().trim() in followedTitles ||
+                    YtDlpManager.isLockedVideoTitle(it.title) ||
+                    YtDlpManager.isShortVideo(it)
+                }.filter { candidate ->
+                    if (queryTokens.isEmpty()) true
+                    else {
+                        val candidateText = (candidate.title + " " + candidate.channelTitle).lowercase()
+                        queryTokens.any { token -> candidateText.contains(token) }
+                    }
+                }
             }
+
+            val candidates1 = filterRelevant(res1, query1)
+            val candidates2 = filterRelevant(res2, query2)
+            val allCandidates = (candidates1 + candidates2).distinctBy { it.id }
+
+            // Hidden bias: prioritize unbiased discovery videos before biased ones
+            val (unbiasedDiscovery, biasedDiscovery) = allCandidates.partition {
+                !YtDlpManager.hasNewsOrAmericaBias(it.title, it.channelTitle)
+            }
+            val candidates = unbiasedDiscovery + biasedDiscovery
 
             if (candidates.isNotEmpty()) {
                 databaseManager.upsertVideos(candidates)
                 databaseManager.pruneOldDiscoveryVideos(300)
-                addLog("Stocked ${candidates.size} new discovery videos from queries: '$query1', '$query2'")
+                addLog("Stocked ${candidates.size} new dynamic discovery videos from queries: '$query1', '$query2'")
             }
         }
     }

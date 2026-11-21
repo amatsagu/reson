@@ -12,8 +12,10 @@ import com.amatsagu.reson.model.Video
  * 3. Creator Round-Robin: Alternates between different creators within each pool rather
  *    than dumping multiple videos from a single creator.
  * 4. Strict De-Duplication & Exclusion: Never emits duplicates or any video in [excludeIds]
- *    (e.g. watched history or continue listening items).
- * 5. Graceful Fallback: If one pool runs low or is empty, seamlessly fills from the other pool.
+ *    (e.g. watched history or continue listening items), and silences YouTube Shorts.
+ * 5. Hidden Bias Demotion: Gives lower priority to non-followed channels and videos with
+ *    words "news" or "america" (bias is completely ignored if the channel is followed).
+ * 6. Graceful Fallback: If one pool runs low or is empty, seamlessly fills from the other pool.
  */
 object FeedMixer {
 
@@ -22,10 +24,25 @@ object FeedMixer {
         recommended: List<Video>,
         excludeIds: Set<String> = emptySet(),
         limit: Int = 30,
-        channelWindowSize: Int = 3
+        channelWindowSize: Int = 3,
+        followedChannelIds: Set<String> = emptySet(),
+        followedChannelTitles: Set<String> = emptySet()
     ): List<Video> {
-        val cleanFollowed = followedUnwatched.filterNot { it.id in excludeIds }
-        val cleanRecommended = recommended.filterNot { it.id in excludeIds }
+        val cleanFollowed = followedUnwatched
+            .filterNot { it.id in excludeIds || YtDlpManager.isShortVideo(it) }
+        val cleanRecommended = recommended
+            .filterNot { it.id in excludeIds || YtDlpManager.isShortVideo(it) }
+
+        fun isBiasedVideo(v: Video): Boolean {
+            val isFollowed = v.channelId in followedChannelIds || v.channelTitle in followedChannelTitles
+            if (isFollowed) return false
+            return YtDlpManager.hasNewsOrAmericaBias(v.title, v.channelTitle)
+        }
+
+        fun isBiasedChannelKey(key: String): Boolean {
+            if (key in followedChannelIds || key in followedChannelTitles) return false
+            return YtDlpManager.hasNewsOrAmericaBias(title = "", channelTitle = key)
+        }
 
         // Group videos by channel key (channelId if non-empty, otherwise channelTitle)
         val followedByChannel = cleanFollowed
@@ -33,7 +50,11 @@ object FeedMixer {
             .mapValues { ArrayDeque(it.value) }
             .toMutableMap()
 
-        val recommendedByChannel = cleanRecommended
+        // Order recommended videos so unbiased videos are queued first within each channel
+        val (unbiasedRec, biasedRec) = cleanRecommended.partition { !isBiasedVideo(it) }
+        val orderedRec = unbiasedRec + biasedRec
+
+        val recommendedByChannel = orderedRec
             .groupBy { it.channelId.ifEmpty { it.channelTitle } }
             .mapValues { ArrayDeque(it.value) }
             .toMutableMap()
@@ -46,22 +67,34 @@ object FeedMixer {
             if (map.isEmpty()) return null
             val lastChannel = recentChannels.lastOrNull()
 
-            // 1. First priority: Pick a channel NOT present in recent sliding window
-            var chosenKey = map.keys.firstOrNull { it !in recentChannels && !map[it].isNullOrEmpty() }
+            fun pickKeyFrom(keys: Collection<String>): String? {
+                // 1. Pick a channel NOT present in recent sliding window
+                var chosen = keys.firstOrNull { it !in recentChannels && !map[it].isNullOrEmpty() }
 
-            // 2. Second priority: If all in sliding window, pick one that is NOT the immediate last channel
-            if (chosenKey == null) {
-                chosenKey = map.keys
-                    .filter { !avoidImmediate || it != lastChannel }
-                    .minByOrNull { key ->
-                        val idx = recentChannels.indexOf(key)
-                        if (idx == -1) -1 else idx
-                    }
+                // 2. If all in sliding window, pick one that is NOT the immediate last channel
+                if (chosen == null) {
+                    chosen = keys
+                        .filter { !avoidImmediate || it != lastChannel }
+                        .minByOrNull { key ->
+                            val idx = recentChannels.indexOf(key)
+                            if (idx == -1) -1 else idx
+                        }
+                }
+
+                // 3. Last resort
+                if (chosen == null) {
+                    chosen = keys.firstOrNull { !map[it].isNullOrEmpty() }
+                }
+                return chosen
             }
 
-            // 3. Last resort: whatever is left
+            // Hidden bias: prioritize unbiased channels over channels with "news" or "america"
+            val unbiasedKeys = map.keys.filter { !isBiasedChannelKey(it) }
+            var chosenKey = if (unbiasedKeys.isNotEmpty()) pickKeyFrom(unbiasedKeys) else null
+
+            // Fallback to biased channels if all unbiased channels are exhausted
             if (chosenKey == null) {
-                chosenKey = map.keys.firstOrNull { !map[it].isNullOrEmpty() }
+                chosenKey = pickKeyFrom(map.keys)
             }
 
             if (chosenKey == null) return null

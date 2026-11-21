@@ -142,7 +142,26 @@ object YouTubeRssFetcher {
                 if (titleNodes.length > 0) {
                     title = titleNodes.item(0).textContent.trim()
                 }
-                if (title.isEmpty() || YtDlpManager.isLockedVideoTitle(title)) continue
+                if (title.isEmpty() || YtDlpManager.isLockedVideoTitle(title) || YtDlpManager.isShortVideoTitle(title)) continue
+
+                var description = ""
+                val descNodes = entry.getElementsByTagNameNS("http://search.yahoo.com/mrss/", "description")
+                if (descNodes.length > 0) {
+                    description = descNodes.item(0).textContent.trim()
+                }
+                if (description.isNotEmpty() && YtDlpManager.isShortVideoTitle(description)) continue
+
+                var isShortLink = false
+                val linkNodes = entry.getElementsByTagName("link")
+                for (j in 0 until linkNodes.length) {
+                    val linkElem = linkNodes.item(j) as? org.w3c.dom.Element ?: continue
+                    val href = linkElem.getAttribute("href")
+                    if (href.contains("/shorts/")) {
+                        isShortLink = true
+                        break
+                    }
+                }
+                if (isShortLink) continue
 
                 var authorName = fallbackChannelTitle
                 val authorNodes = entry.getElementsByTagName("author")
