@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
 
 /**
- * SQLite open helper managing creation, indexing, migrations, and WAL mode for Reson.
+ * SQLite open helper managing creation, indexing, migrations, PRAGMAs, and WAL mode for Reson.
  */
 class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     context,
@@ -18,6 +18,24 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.enableWriteAheadLogging()
+        db.setForeignKeyConstraintsEnabled(true)
+    }
+
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        try {
+            // High-performance WAL mode tuning:
+            // 1. NORMAL synchronous mode is 100% crash-safe in WAL and eliminates fsync stalls
+            db.execSQL("PRAGMA synchronous = NORMAL")
+            // 2. Keep temporary tables and sorts in RAM
+            db.execSQL("PRAGMA temp_store = MEMORY")
+            // 3. 4 MB in-memory SQLite cache (-4000 KiB)
+            db.execSQL("PRAGMA cache_size = -4000")
+            // Ensure all composite indexes exist
+            createIndexes(db)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error applying SQLite pragmas on open: ${e.message}")
+        }
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -77,30 +95,39 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
             """.trimIndent()
         )
 
-        // Performance Indexes
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_channels_followed ON channels(is_followed, followed_at DESC)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_channel_id ON videos(channel_id)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_last_played ON videos(last_played_at DESC)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_downloaded ON videos(is_downloaded)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_release ON videos(release_timestamp DESC)")
-
+        createIndexes(db)
         Log.i(TAG, "Reson SQLite database schema and indexes created successfully.")
     }
 
+    private fun createIndexes(db: SQLiteDatabase) {
+        // Performance Indexes: composite indexes matching exact WHERE + ORDER BY queries
+        // 1. Followed channels
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_channels_followed ON channels(is_followed, followed_at DESC)")
+
+        // 2. Channel videos & joins (covers getVideosForChannel, partitions, joins)
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_channel_release ON videos(channel_id, release_timestamp DESC, created_at DESC)")
+
+        // 3. Global release ordering for Feed & within-month queries
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_release_created ON videos(release_timestamp DESC, created_at DESC)")
+
+        // 4. Discovery feed ordering (newest discovered first)
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_created_release ON videos(created_at DESC, release_timestamp DESC)")
+
+        // 5. Downloads screen with playback state order
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_downloaded_ordered ON videos(is_downloaded, last_played_at DESC, created_at DESC)")
+
+        // 6. Playback history & continue listening
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_last_played ON videos(last_played_at DESC)")
+    }
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        Log.i(TAG, "Recreating database from $oldVersion to $newVersion...")
-        db.execSQL("DROP TABLE IF EXISTS channels")
-        db.execSQL("DROP TABLE IF EXISTS videos")
-        db.execSQL("DROP TABLE IF EXISTS search_history")
-        onCreate(db)
+        Log.i(TAG, "Upgrading database from $oldVersion to $newVersion...")
+        createIndexes(db)
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        Log.i(TAG, "Downgrading database from $oldVersion to $newVersion (wiping & recreating)...")
-        db.execSQL("DROP TABLE IF EXISTS channels")
-        db.execSQL("DROP TABLE IF EXISTS videos")
-        db.execSQL("DROP TABLE IF EXISTS search_history")
-        onCreate(db)
+        Log.i(TAG, "Downgrading database from $oldVersion to $newVersion...")
+        createIndexes(db)
     }
 
     companion object {

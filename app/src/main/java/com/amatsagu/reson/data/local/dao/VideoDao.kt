@@ -17,7 +17,8 @@ class VideoDao {
         // Try inserting with CONFLICT_IGNORE if row is new
         val rowId = db.insertWithOnConflict("videos", null, values, SQLiteDatabase.CONFLICT_IGNORE)
         if (rowId == -1L) {
-            // Row already exists: update fields while preserving existing playback and download states
+            // Row already exists: update fields while preserving existing playback, download, and created_at states
+            values.remove("created_at")
             val existing = getVideoById(db, video.id)
             if (existing != null) {
                 if (video.playbackPositionMs == 0L && existing.playbackPositionMs > 0L) {
