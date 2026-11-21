@@ -4,11 +4,10 @@ import android.util.Log
 import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 /**
  * Fast YouTube autocomplete client.
@@ -18,6 +17,7 @@ object SearchSuggestClient {
 
     private const val TAG = "Reson:Suggest"
     private const val BASE_URL = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q="
+    private const val MAX_SUGGESTIONS = 10
 
     suspend fun getSuggestions(query: String): List<String> = withContext(ResonDispatchers.Network) {
         val trimmed = query.trim()
@@ -25,7 +25,7 @@ object SearchSuggestClient {
 
         var connection: HttpURLConnection? = null
         try {
-            val encoded = URLEncoder.encode(trimmed, "UTF-8")
+            val encoded = URLEncoder.encode(trimmed, StandardCharsets.UTF_8.name())
             val url = URL(BASE_URL + encoded)
             connection = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 3000
@@ -35,20 +35,21 @@ object SearchSuggestClient {
             }
 
             if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                val response = reader.readText()
-                reader.close()
+                val response = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
 
                 // Response format: ["query", ["suggestion 1", "suggestion 2", ...]]
                 val rootArray = JSONArray(response)
                 if (rootArray.length() >= 2) {
                     val suggestionsArray = rootArray.getJSONArray(1)
                     val result = mutableListOf<String>()
-                    for (i in 0 until suggestionsArray.length()) {
+                    val limit = minOf(suggestionsArray.length(), MAX_SUGGESTIONS)
+                    for (i in 0 until limit) {
                         result.add(suggestionsArray.getString(i))
                     }
                     return@withContext result
                 }
+            } else {
+                connection.errorStream?.close()
             }
         } catch (e: Exception) {
             Log.d(TAG, "Autocomplete suggestion error for '$trimmed': ${e.message}")

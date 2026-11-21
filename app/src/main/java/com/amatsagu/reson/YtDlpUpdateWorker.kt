@@ -36,8 +36,11 @@ class YtDlpUpdateWorker(
             }
             is ResonResult.Failure -> {
                 Log.w(TAG, "Background update failed: ${updateResult.message}")
-                // Retry later according to backoff policy
-                Result.retry()
+                if (runAttemptCount >= 3) {
+                    Result.failure()
+                } else {
+                    Result.retry()
+                }
             }
         }
     }

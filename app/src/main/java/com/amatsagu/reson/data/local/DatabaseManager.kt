@@ -480,6 +480,18 @@ class DatabaseManager private constructor(private val appContext: Context) {
         if (changed) {
             notifyVideoChanged()
         }
+        // Keep SQLite lean and performant by safely pruning excess unplayed discovery items
+        videoDao.pruneOldDiscoveryVideos(db, 600)
+    }
+
+    /**
+     * Safely bounds unplayed discovery videos (channels not followed) to keep SQLite database lean.
+     */
+    suspend fun pruneOldDiscoveryVideos(maxDiscoveryCount: Int = 600): Unit = withContext(dispatcher) {
+        mutex.withLock {
+            val db = dbHelper.writableDatabase
+            videoDao.pruneOldDiscoveryVideos(db, maxDiscoveryCount)
+        }
     }
 
     /**

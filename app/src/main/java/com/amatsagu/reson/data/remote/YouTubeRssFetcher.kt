@@ -79,13 +79,16 @@ object YouTubeRssFetcher {
             }
 
             if (responseCode != HttpURLConnection.HTTP_OK) {
+                connection.errorStream?.close()
                 return@withContext Result.Failure(
                     IllegalStateException("HTTP error $responseCode"),
                     "Failed to fetch feed: HTTP $responseCode"
                 )
             }
 
-            val videos = parseAtomFeed(connection.inputStream, cleanId, fallbackChannelTitle)
+            val videos = connection.inputStream.use { stream ->
+                parseAtomFeed(stream, cleanId, fallbackChannelTitle)
+            }
             Log.d(TAG, "RSS fetch for $cleanId succeeded. Found ${videos.size} uploads.")
             Result.Success(videos)
         } catch (e: Throwable) {
@@ -103,8 +106,14 @@ object YouTubeRssFetcher {
     ): List<Video> {
         val videos = mutableListOf<Video>()
         try {
-            val dbFactory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
-            dbFactory.isNamespaceAware = true
+            val dbFactory = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+                isNamespaceAware = true
+                try {
+                    setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                    setFeature("http://xml.org/sax/features/external-general-entities", false)
+                    setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+                } catch (_: Throwable) {}
+            }
             val dBuilder = dbFactory.newDocumentBuilder()
             val doc = dBuilder.parse(inputStream)
             doc.documentElement.normalize()

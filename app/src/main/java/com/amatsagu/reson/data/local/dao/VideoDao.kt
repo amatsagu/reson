@@ -52,13 +52,11 @@ class VideoDao {
 
     fun getVideoById(db: SQLiteDatabase, videoId: String): Video? {
         db.rawQuery("SELECT * FROM videos WHERE id = ? LIMIT 1", arrayOf(videoId)).use { cursor ->
-            return if (cursor.moveToFirst()) cursorToVideo(cursor) else null
+            return if (cursor.moveToFirst()) cursorToVideo(cursor, VideoCursorIndices(cursor)) else null
         }
     }
 
     fun getFeedVideos(db: SQLiteDatabase, limit: Int = 30, offset: Int = 0): List<Video> {
-        val videos = mutableListOf<Video>()
-        // Join with followed channels so we only fetch content from active subscriptions
         val query = """
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
@@ -66,12 +64,7 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
     }
 
     /**
@@ -82,7 +75,6 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0
     ): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = """
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
@@ -92,12 +84,7 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
     }
 
     /**
@@ -108,7 +95,6 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0
     ): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = """
             SELECT v.* FROM videos v
             LEFT JOIN channels c ON v.channel_id = c.id
@@ -118,17 +104,10 @@ class VideoDao {
             ORDER BY v.created_at DESC, v.release_timestamp DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
     }
 
     fun getContinueListeningVideos(db: SQLiteDatabase, limit: Int = 10, offset: Int = 0): List<Video> {
-        val videos = mutableListOf<Video>()
-        // In-progress: started (progress > 1% or position > 3s) and not fully listened (< 98% complete)
         val query = """
             SELECT * FROM videos
             WHERE last_played_at > 0 
@@ -137,23 +116,12 @@ class VideoDao {
             ORDER BY last_played_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
     }
 
     fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 30, offset: Int = 0): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = "SELECT * FROM videos WHERE channel_id = ? ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
-        db.rawQuery(query, arrayOf(channelId, limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(channelId, limit.toString(), offset.toString()))
     }
 
     /**
@@ -165,7 +133,6 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0,
     ): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = """
             SELECT v.* FROM (
                 SELECT v.*, ROW_NUMBER() OVER (
@@ -180,12 +147,7 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(maxPerChannel.toString(), limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(maxPerChannel.toString(), limit.toString(), offset.toString()))
     }
 
     /**
@@ -199,7 +161,6 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0
     ): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = """
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
@@ -208,34 +169,17 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        db.rawQuery(query, arrayOf(minTimestampSec.toString(), minCreatedAtMs.toString(), limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(minTimestampSec.toString(), minCreatedAtMs.toString(), limit.toString(), offset.toString()))
     }
 
     fun getDownloadedVideos(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = "SELECT * FROM videos WHERE is_downloaded = 1 ORDER BY last_played_at DESC, created_at DESC LIMIT ? OFFSET ?"
-        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
     }
 
     fun getPlaybackHistory(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
-        val videos = mutableListOf<Video>()
         val query = "SELECT * FROM videos WHERE last_played_at > 0 ORDER BY last_played_at DESC LIMIT ? OFFSET ?"
-        db.rawQuery(query, arrayOf(limit.toString(), offset.toString())).use { cursor ->
-            while (cursor.moveToNext()) {
-                videos.add(cursorToVideo(cursor))
-            }
-        }
-        return videos
+        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
     }
 
     fun clearPlaybackHistory(db: SQLiteDatabase): Boolean {
@@ -284,6 +228,54 @@ class VideoDao {
         db.execSQL(query, arrayOf(maxRecords.toString()))
     }
 
+    /**
+     * Safely bounds the unplayed discovery video cache to prevent indefinite accumulation.
+     * STRICT SAFETY GUARANTEES:
+     * 1. NEVER deletes any video that has been played (last_played_at > 0, playback_progress > 0, playback_position_ms > 0)
+     * 2. NEVER deletes any video in Continue Listening or History
+     * 3. NEVER deletes any downloaded video (is_downloaded = 1 or download_file_path is non-null)
+     * 4. NEVER deletes any video from followed channels (matched by channel_id OR channel_title)
+     * 5. NEVER deletes based on age/timestamp (preserves offline feed browsing without unexpected drops)
+     * 6. ONLY removes excess unplayed discovery items if the unplayed pool exceeds [maxDiscoveryCount] (default 600)
+     */
+    fun pruneOldDiscoveryVideos(db: SQLiteDatabase, maxDiscoveryCount: Int = 600) {
+        val countQuery = """
+            SELECT COUNT(*) FROM videos v
+            WHERE v.is_downloaded = 0
+              AND v.download_file_path IS NULL
+              AND v.last_played_at = 0
+              AND v.playback_progress = 0
+              AND v.playback_position_ms = 0
+              AND v.channel_id NOT IN (SELECT id FROM channels WHERE is_followed = 1)
+              AND v.channel_title NOT IN (SELECT title FROM channels WHERE is_followed = 1)
+        """.trimIndent()
+
+        val totalUnplayedDiscovery = db.rawQuery(countQuery, null).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+
+        // If within safety quota, do not delete anything
+        if (totalUnplayedDiscovery <= maxDiscoveryCount) return
+
+        val toDeleteCount = totalUnplayedDiscovery - maxDiscoveryCount
+        val deleteQuery = """
+            DELETE FROM videos
+            WHERE id IN (
+                SELECT v.id FROM videos v
+                WHERE v.is_downloaded = 0
+                  AND v.download_file_path IS NULL
+                  AND v.last_played_at = 0
+                  AND v.playback_progress = 0
+                  AND v.playback_position_ms = 0
+                  AND v.channel_id NOT IN (SELECT id FROM channels WHERE is_followed = 1)
+                  AND v.channel_title NOT IN (SELECT title FROM channels WHERE is_followed = 1)
+                ORDER BY v.created_at ASC
+                LIMIT ?
+            )
+        """.trimIndent()
+        db.execSQL(deleteQuery, arrayOf(toDeleteCount.toString()))
+    }
+
     fun updateDownloadStatus(db: SQLiteDatabase, videoId: String, isDownloaded: Boolean, filePath: String?): Boolean {
         val values = ContentValues().apply {
             put("is_downloaded", if (isDownloaded) 1 else 0)
@@ -329,29 +321,63 @@ class VideoDao {
         }
     }
 
-    private fun cursorToVideo(cursor: Cursor): Video {
-        val releaseTimestampIndex = cursor.getColumnIndex("release_timestamp")
-        val releaseTimestamp = if (releaseTimestampIndex >= 0) cursor.getLong(releaseTimestampIndex) else 0L
-        val downloadFilePathIndex = cursor.getColumnIndex("download_file_path")
-        val downloadFilePath = if (downloadFilePathIndex >= 0) cursor.getString(downloadFilePathIndex) else null
+    private fun queryVideos(
+        db: SQLiteDatabase,
+        sql: String,
+        selectionArgs: Array<String>? = null
+    ): List<Video> {
+        val videos = mutableListOf<Video>()
+        db.rawQuery(sql, selectionArgs).use { cursor ->
+            if (cursor.moveToFirst()) {
+                val indices = VideoCursorIndices(cursor)
+                do {
+                    videos.add(cursorToVideo(cursor, indices))
+                } while (cursor.moveToNext())
+            }
+        }
+        return videos
+    }
+
+    private class VideoCursorIndices(cursor: Cursor) {
+        val id = cursor.getColumnIndexOrThrow("id")
+        val title = cursor.getColumnIndexOrThrow("title")
+        val channelTitle = cursor.getColumnIndexOrThrow("channel_title")
+        val durationText = cursor.getColumnIndexOrThrow("duration_text")
+        val durationSeconds = cursor.getColumnIndexOrThrow("duration_seconds")
+        val releaseDateText = cursor.getColumnIndexOrThrow("release_date_text")
+        val releaseTimestamp = cursor.getColumnIndex("release_timestamp")
+        val thumbnailUrl = cursor.getColumnIndexOrThrow("thumbnail_url")
+        val webpageUrl = cursor.getColumnIndexOrThrow("webpage_url")
+        val playbackProgress = cursor.getColumnIndexOrThrow("playback_progress")
+        val isDownloaded = cursor.getColumnIndexOrThrow("is_downloaded")
+        val downloadFilePath = cursor.getColumnIndex("download_file_path")
+        val channelId = cursor.getColumnIndexOrThrow("channel_id")
+        val playbackPositionMs = cursor.getColumnIndexOrThrow("playback_position_ms")
+        val playbackDurationMs = cursor.getColumnIndexOrThrow("playback_duration_ms")
+        val lastPlayedAt = cursor.getColumnIndexOrThrow("last_played_at")
+    }
+
+    private fun cursorToVideo(cursor: Cursor, indices: VideoCursorIndices): Video {
+        val releaseTimestamp = if (indices.releaseTimestamp >= 0) cursor.getLong(indices.releaseTimestamp) else 0L
+        val downloadFilePath = if (indices.downloadFilePath >= 0) cursor.getString(indices.downloadFilePath) else null
         return Video(
-            id = cursor.getString(cursor.getColumnIndexOrThrow("id")),
-            title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
-            channelTitle = cursor.getString(cursor.getColumnIndexOrThrow("channel_title")),
-            durationText = cursor.getString(cursor.getColumnIndexOrThrow("duration_text")),
-            durationSeconds = cursor.getInt(cursor.getColumnIndexOrThrow("duration_seconds")),
-            releaseDateText = cursor.getString(cursor.getColumnIndexOrThrow("release_date_text")),
+            id = cursor.getString(indices.id),
+            title = cursor.getString(indices.title),
+            channelTitle = cursor.getString(indices.channelTitle),
+            durationText = cursor.getString(indices.durationText),
+            durationSeconds = cursor.getInt(indices.durationSeconds),
+            releaseDateText = cursor.getString(indices.releaseDateText),
             releaseTimestamp = releaseTimestamp,
-            thumbnailUrl = cursor.getString(cursor.getColumnIndexOrThrow("thumbnail_url")),
-            webpageUrl = cursor.getString(cursor.getColumnIndexOrThrow("webpage_url")),
-            playbackProgress = cursor.getFloat(cursor.getColumnIndexOrThrow("playback_progress")),
-            isDownloaded = cursor.getInt(cursor.getColumnIndexOrThrow("is_downloaded")) == 1,
+            thumbnailUrl = cursor.getString(indices.thumbnailUrl),
+            webpageUrl = cursor.getString(indices.webpageUrl),
+            playbackProgress = cursor.getFloat(indices.playbackProgress),
+            isDownloaded = cursor.getInt(indices.isDownloaded) == 1,
             downloadProgress = null,
             downloadFilePath = downloadFilePath,
-            channelId = cursor.getString(cursor.getColumnIndexOrThrow("channel_id")),
-            playbackPositionMs = cursor.getLong(cursor.getColumnIndexOrThrow("playback_position_ms")),
-            playbackDurationMs = cursor.getLong(cursor.getColumnIndexOrThrow("playback_duration_ms")),
-            lastPlayedAt = cursor.getLong(cursor.getColumnIndexOrThrow("last_played_at")),
+            channelId = cursor.getString(indices.channelId),
+            playbackPositionMs = cursor.getLong(indices.playbackPositionMs),
+            playbackDurationMs = cursor.getLong(indices.playbackDurationMs),
+            lastPlayedAt = cursor.getLong(indices.lastPlayedAt),
         )
     }
 }

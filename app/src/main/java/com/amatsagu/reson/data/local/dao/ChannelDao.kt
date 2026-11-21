@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import com.amatsagu.reson.model.Channel
 
 /**
- * Data access operations for the channels table.
+ * Data access operations for the channels table with pre-resolved cursor column indices.
  */
 class ChannelDao {
 
@@ -60,14 +60,8 @@ class ChannelDao {
     }
 
     fun getFollowedChannels(db: SQLiteDatabase): List<Channel> {
-        val channels = mutableListOf<Channel>()
         val query = "SELECT * FROM channels WHERE is_followed = 1 ORDER BY followed_at DESC"
-        db.rawQuery(query, null).use { cursor ->
-            while (cursor.moveToNext()) {
-                channels.add(cursorToChannel(cursor))
-            }
-        }
-        return channels
+        return queryChannels(db, query)
     }
 
     fun getFollowedChannelIds(db: SQLiteDatabase): Set<String> {
@@ -82,7 +76,7 @@ class ChannelDao {
 
     fun getChannelById(db: SQLiteDatabase, channelId: String): Channel? {
         db.rawQuery("SELECT * FROM channels WHERE id = ? LIMIT 1", arrayOf(channelId)).use { cursor ->
-            return if (cursor.moveToFirst()) cursorToChannel(cursor) else null
+            return if (cursor.moveToFirst()) cursorToChannel(cursor, ChannelCursorIndices(cursor)) else null
         }
     }
 
@@ -103,19 +97,47 @@ class ChannelDao {
         }
     }
 
-    private fun cursorToChannel(cursor: Cursor): Channel {
-        val id = cursor.getString(cursor.getColumnIndexOrThrow("id"))
-        val title = cursor.getString(cursor.getColumnIndexOrThrow("title"))
-        val handle = cursor.getString(cursor.getColumnIndexOrThrow("handle"))
-        val avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow("avatar_url"))
-        val avatarBase64Index = cursor.getColumnIndex("avatar_base64")
-        val avatarBase64 = if (avatarBase64Index >= 0) cursor.getString(avatarBase64Index) ?: "" else ""
-        val subs = cursor.getLong(cursor.getColumnIndexOrThrow("subscriber_count"))
-        val subsText = cursor.getString(cursor.getColumnIndexOrThrow("subscriber_count_text"))
-        val isFollowed = cursor.getInt(cursor.getColumnIndexOrThrow("is_followed")) == 1
-        val followedAt = cursor.getLong(cursor.getColumnIndexOrThrow("followed_at"))
-        val lastSyncAtIndex = cursor.getColumnIndex("last_sync_at")
-        val lastSyncAt = if (lastSyncAtIndex >= 0) cursor.getLong(lastSyncAtIndex) else 0L
+    private fun queryChannels(
+        db: SQLiteDatabase,
+        sql: String,
+        selectionArgs: Array<String>? = null
+    ): List<Channel> {
+        val channels = mutableListOf<Channel>()
+        db.rawQuery(sql, selectionArgs).use { cursor ->
+            if (cursor.moveToFirst()) {
+                val indices = ChannelCursorIndices(cursor)
+                do {
+                    channels.add(cursorToChannel(cursor, indices))
+                } while (cursor.moveToNext())
+            }
+        }
+        return channels
+    }
+
+    private class ChannelCursorIndices(cursor: Cursor) {
+        val id = cursor.getColumnIndexOrThrow("id")
+        val title = cursor.getColumnIndexOrThrow("title")
+        val handle = cursor.getColumnIndexOrThrow("handle")
+        val avatarUrl = cursor.getColumnIndexOrThrow("avatar_url")
+        val avatarBase64 = cursor.getColumnIndex("avatar_base64")
+        val subscriberCount = cursor.getColumnIndexOrThrow("subscriber_count")
+        val subscriberCountText = cursor.getColumnIndexOrThrow("subscriber_count_text")
+        val isFollowed = cursor.getColumnIndexOrThrow("is_followed")
+        val followedAt = cursor.getColumnIndexOrThrow("followed_at")
+        val lastSyncAt = cursor.getColumnIndex("last_sync_at")
+    }
+
+    private fun cursorToChannel(cursor: Cursor, indices: ChannelCursorIndices): Channel {
+        val id = cursor.getString(indices.id)
+        val title = cursor.getString(indices.title)
+        val handle = cursor.getString(indices.handle)
+        val avatarUrl = cursor.getString(indices.avatarUrl)
+        val avatarBase64 = if (indices.avatarBase64 >= 0) cursor.getString(indices.avatarBase64) ?: "" else ""
+        val subs = cursor.getLong(indices.subscriberCount)
+        val subsText = cursor.getString(indices.subscriberCountText)
+        val isFollowed = cursor.getInt(indices.isFollowed) == 1
+        val followedAt = cursor.getLong(indices.followedAt)
+        val lastSyncAt = if (indices.lastSyncAt >= 0) cursor.getLong(indices.lastSyncAt) else 0L
         return Channel(
             id = id,
             title = title,

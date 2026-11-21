@@ -143,7 +143,11 @@ class YtDlpManager private constructor(private val appContext: Context) {
     @Volatile
     private var consecutiveRateLimits: Int = 0
 
-    private val streamUrlCache = mutableMapOf<String, Pair<String, Long>>() // videoId -> (streamUrl, expiryEpochMs)
+    private val streamUrlCache = object : LinkedHashMap<String, Pair<String, Long>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, Long>>?): Boolean {
+            return size > 50
+        }
+    } // videoId -> (streamUrl, expiryEpochMs)
     private val streamCacheMutex = Mutex()
 
     init {
@@ -168,6 +172,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
     companion object {
         private const val TAG = "Reson:YtDlp"
+        private const val MAX_STREAM_CACHE_SIZE = 50
 
         @Volatile
         private var instance: YtDlpManager? = null
@@ -606,9 +611,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
             block = block,
             deferred = deferred
         )
+        // Bound priority queue to avoid unbounded accumulation in pathological offline states
+        if (priorityQueue.size > 50) {
+            priorityQueue.removeIf { !it.deferred.isActive }
+        }
         priorityQueue.offer(task)
         wakeSignal.trySend(Unit)
-        return deferred.await()
+        return try {
+            deferred.await()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            deferred.cancel(e)
+            throw e
+        }
     }
 
     /**
@@ -694,15 +708,28 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
     }
 
+    @Volatile
+    private var lastUpdateCheckEpochMs: Long = 0L
+
     /**
      * Self-patching / Updates yt-dlp to the latest release directly from upstream GitHub releases.
+     * Includes 1-hour throttling for automatic checks unless force = true.
      */
     suspend fun update(
         channel: UpdateChannel = UpdateChannel.STABLE,
-        priority: TaskPriority = TaskPriority.BACKGROUND
+        priority: TaskPriority = TaskPriority.BACKGROUND,
+        force: Boolean = false
     ): Result<String> = withContext(networkDispatcher) {
+        val now = System.currentTimeMillis()
+        if (!force && (now - lastUpdateCheckEpochMs) < (1 * 3600 * 1000L)) {
+            val v = getVersionName()
+            Log.d(TAG, "yt-dlp update check skipped (checked within last 1h, current version: $v)")
+            return@withContext Result.Success("Already up to date ($v)")
+        }
+
         executeQueued(priority, "Update:$channel") {
             mutex.withLock {
+                lastUpdateCheckEpochMs = System.currentTimeMillis()
                 val currentVersion = getVersionName()
                 _state.value = YtDlpState.Updating(currentVersion = currentVersion)
                 Log.i(TAG, "Checking for yt-dlp updates (channel: $channel)...")
@@ -793,7 +820,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
     ): Result<String> = withContext(networkDispatcher) {
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
-            val cached = streamCacheMutex.withLock { streamUrlCache[videoId] }
+            val cached = streamCacheMutex.withLock {
+                val entry = streamUrlCache[videoId]
+                if (entry != null && now >= entry.second) {
+                    streamUrlCache.remove(videoId)
+                    null
+                } else {
+                    entry
+                }
+            }
             if (cached != null) {
                 val (url, expiryMs) = cached
                 if (now < (expiryMs - 15 * 60 * 1000L)) {
@@ -847,6 +882,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
                                     }
                                 }
                                 streamCacheMutex.withLock {
+                                    val currentTime = System.currentTimeMillis()
+                                    if (streamUrlCache.size >= MAX_STREAM_CACHE_SIZE / 2) {
+                                        streamUrlCache.entries.removeIf { it.value.second <= currentTime }
+                                    }
                                     streamUrlCache[videoId] = Pair(streamUrl, expiryMs)
                                 }
                                 Log.d(TAG, "Extracted fresh stream URL for $videoId via client '$clientArg' format '$format' (expires in ${(expiryMs - System.currentTimeMillis()) / 60000} mins)")
@@ -1041,57 +1080,61 @@ class YtDlpManager private constructor(private val appContext: Context) {
         var currentUrl = streamUrl
         var redirectCount = 0
         while (redirectCount < 5) {
-            val connection = java.net.URL(currentUrl).openConnection() as java.net.HttpURLConnection
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-            )
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 30_000
-
-            val code = connection.responseCode
-            if (code == java.net.HttpURLConnection.HTTP_MOVED_PERM ||
-                code == java.net.HttpURLConnection.HTTP_MOVED_TEMP ||
-                code == 307 || code == 308
-            ) {
-                val loc = connection.getHeaderField("Location")
-                if (!loc.isNullOrBlank()) {
-                    currentUrl = loc
-                    redirectCount++
-                    connection.disconnect()
-                    continue
+            var connection: java.net.HttpURLConnection? = null
+            try {
+                connection = (java.net.URL(currentUrl).openConnection() as java.net.HttpURLConnection).apply {
+                    instanceFollowRedirects = true
+                    setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                    )
+                    connectTimeout = 15_000
+                    readTimeout = 30_000
                 }
-            }
 
-            if (code !in 200..299) {
-                connection.disconnect()
-                throw java.io.IOException("HTTP $code from stream server")
-            }
-
-            val contentType = connection.contentType
-            val detectedExt = detectAudioExtension(contentType, currentUrl)
-            val totalBytes = connection.contentLengthLong
-            connection.inputStream.use { input ->
-                destFile.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var bytesRead = 0L
-                    var read: Int
-                    var lastUpdate = 0L
-                    while (input.read(buffer).also { read = it } != -1) {
-                        output.write(buffer, 0, read)
-                        bytesRead += read
-                        val now = System.currentTimeMillis()
-                        if (totalBytes > 0 && now - lastUpdate > 100) {
-                            lastUpdate = now
-                            onProgress((bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 0.99f))
-                        }
+                val code = connection.responseCode
+                if (code == java.net.HttpURLConnection.HTTP_MOVED_PERM ||
+                    code == java.net.HttpURLConnection.HTTP_MOVED_TEMP ||
+                    code == 307 || code == 308
+                ) {
+                    val loc = connection.getHeaderField("Location")
+                    if (!loc.isNullOrBlank()) {
+                        currentUrl = loc
+                        redirectCount++
+                        continue
                     }
-                    output.flush()
                 }
+
+                if (code !in 200..299) {
+                    connection.errorStream?.close()
+                    throw java.io.IOException("HTTP $code from stream server")
+                }
+
+                val contentType = connection.contentType
+                val detectedExt = detectAudioExtension(contentType, currentUrl)
+                val totalBytes = connection.contentLengthLong
+                connection.inputStream.use { input ->
+                    destFile.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var bytesRead = 0L
+                        var read: Int
+                        var lastUpdate = 0L
+                        while (input.read(buffer).also { read = it } != -1) {
+                            output.write(buffer, 0, read)
+                            bytesRead += read
+                            val now = System.currentTimeMillis()
+                            if (totalBytes > 0 && now - lastUpdate > 100) {
+                                lastUpdate = now
+                                onProgress((bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 0.99f))
+                            }
+                        }
+                        output.flush()
+                    }
+                }
+                return if (destFile.exists() && destFile.length() > 0) detectedExt else null
+            } finally {
+                connection?.disconnect()
             }
-            connection.disconnect()
-            return if (destFile.exists() && destFile.length() > 0) detectedExt else null
         }
         return null
     }

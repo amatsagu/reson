@@ -145,6 +145,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var searchPaginationJob: Job? = null
     private var updateJob: Job? = null
     private var selfRepairJob: Job? = null
+    private var syncJob: Job? = null
 
     private val userPreferences = UserPreferences.getInstance(application)
     val themeColor: StateFlow<ThemeColor> = userPreferences.themeColor
@@ -948,7 +949,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun syncFollowedChannels(force: Boolean = false) {
         if (_uiState.value.isSyncingChannels) return
 
-        viewModelScope.launch {
+        syncJob = viewModelScope.launch {
             val channels = databaseManager.getFollowedChannels()
             if (channels.isEmpty()) return@launch
 
@@ -1121,6 +1122,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             if (candidates.isNotEmpty()) {
                 databaseManager.upsertVideos(candidates)
+                databaseManager.pruneOldDiscoveryVideos(300)
                 addLog("Stocked ${candidates.size} new discovery videos from queries: '$query1', '$query2'")
             }
         }
@@ -1348,6 +1350,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        syncJob?.cancel()
+        searchJob?.cancel()
+        suggestJob?.cancel()
+        playJob?.cancel()
+        playWatchdogJob?.cancel()
+        channelFilterJob?.cancel()
+        feedPaginationJob?.cancel()
+        continuePaginationJob?.cancel()
+        channelPaginationJob?.cancel()
+        searchPaginationJob?.cancel()
+        updateJob?.cancel()
+        selfRepairJob?.cancel()
         flushPlaybackProgressAndListeningTime(sync = true)
         progressChannel.close()
         activeDownloadJob?.cancel()
@@ -1547,7 +1561,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (updateJob?.isActive == true) return
         updateJob = viewModelScope.launch(ResonDispatchers.Network) {
             addLog("Triggered manual update check...")
-            val result = ytDlpManager.update(UpdateChannel.STABLE)
+            val result = ytDlpManager.update(UpdateChannel.STABLE, force = true)
             when (result) {
                 is Result.Success -> addLog("Update result: ${result.data}")
                 is Result.Failure -> addLog("Update failed: ${result.message}")
