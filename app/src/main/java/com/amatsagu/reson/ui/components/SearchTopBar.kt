@@ -132,6 +132,10 @@ fun SearchOverlay(
     suggestions: List<String>,
     isSearching: Boolean,
     searchResults: List<SearchResultItem>,
+    onPlayVideo: (Video) -> Unit,
+    onDownloadVideo: (Video) -> Unit,
+    onFollowChannel: (Channel) -> Unit,
+    modifier: Modifier = Modifier,
     isSearchLoadingMore: Boolean = false,
     onLoadMore: () -> Unit = {},
     @androidx.annotation.StringRes errorRes: Int? = null,
@@ -139,13 +143,9 @@ fun SearchOverlay(
     currentPlayingVideoId: String? = null,
     isPlaybackActive: Boolean = false,
     isAudioBuffering: Boolean = false,
-    onPlayVideo: (Video) -> Unit,
-    onDownloadVideo: (Video) -> Unit,
-    onFollowChannel: (Channel) -> Unit,
     queuedDownloadIds: Set<String> = emptySet(),
     downloadingProgressMap: Map<String, Float> = emptyMap(),
     contentPadding: PaddingValues = PaddingValues(0.dp),
-    modifier: Modifier = Modifier,
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -175,7 +175,7 @@ fun SearchOverlay(
         derivedStateOf {
             val total = listState.layoutInfo.totalItemsCount
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            total > 0 && lastVisible >= total - 3
+            (total > 0) && (lastVisible >= (total - 3))
         }
     }
 

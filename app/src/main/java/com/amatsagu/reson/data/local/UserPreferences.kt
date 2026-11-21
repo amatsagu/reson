@@ -1,5 +1,6 @@
 package com.amatsagu.reson.data.local
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.ui.graphics.Color
@@ -94,6 +95,7 @@ class UserPreferences private constructor(context: Context) {
         prefs.edit().putString(KEY_LANGUAGE, lang).apply()
     }
 
+    @SuppressLint("ApplySharedPref")
     fun addListeningTime(deltaMs: Long, sync: Boolean = false) {
         if (deltaMs <= 0L) return
         val updated = _totalListeningTimeMs.value + deltaMs

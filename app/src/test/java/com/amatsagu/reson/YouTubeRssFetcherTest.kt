@@ -119,9 +119,9 @@ class YouTubeRssFetcherTest {
     fun testFormatLastSyncedText() {
         // Test timestamps format logic
         val now = System.currentTimeMillis()
-        val diffJustNow = (now - 10_000L) // 10s ago
-        val diff15Min = (now - 15 * 60 * 1000L) // 15m ago
-        val diff3Hours = (now - 3 * 3600 * 1000L) // 3h ago
+        val diffJustNow = now - 10_000L // 10s ago
+        val diff15Min = now - (15 * 60 * 1000L) // 15m ago
+        val diff3Hours = now - (3 * 3600 * 1000L) // 3h ago
 
         val secJustNow = (now - diffJustNow) / 1000L
         assertTrue(secJustNow < 60L)

@@ -15,7 +15,7 @@ class FeedMixerTest {
             channelTitle = channelId,
             title = title,
             durationText = "10m",
-            releaseTimestamp = 1700000000L
+            releaseTimestamp = 1700000000L,
         )
     }
 
@@ -50,7 +50,7 @@ class FeedMixerTest {
 
         val mixed = FeedMixer.mix(followed, recommended, limit = 18, channelWindowSize = 2)
 
-        for (i in 0 until mixed.size - 1) {
+        for (i in 0 until (mixed.size - 1)) {
             val ch1 = mixed[i].channelId
             val ch2 = mixed[i + 1].channelId
             assertFalse("Consecutive videos share the same channel: $ch1 at indices $i and ${i + 1}", ch1 == ch2)
@@ -100,10 +100,14 @@ class FeedMixerTest {
         val video = createTestVideo("1", "c1", "Mitchell Hashimoto Reinvents the Terminal... Again | Standup #80")
         val channel = com.amatsagu.reson.model.Channel(id = "c1", title = "TheStandupPod")
         val query = DynamicTopicExtractor.extractSearchQuery(video, channel)
-        assertTrue("Expected topic query to contain Mitchell Hashimoto Terminal, got '$query'",
-            query?.contains("Mitchell Hashimoto", ignoreCase = true) == true)
-        assertFalse("Expected channel/series noise stripped, got '$query'",
-            query?.contains("Standup", ignoreCase = true) == true)
+        assertTrue(
+            "Expected topic query to contain Mitchell Hashimoto Terminal, got '$query'",
+            query?.contains("Mitchell Hashimoto", ignoreCase = true) == true,
+        )
+        assertFalse(
+            "Expected channel/series noise stripped, got '$query'",
+            query?.contains("Standup", ignoreCase = true) == true,
+        )
     }
 
     @Test
@@ -111,10 +115,14 @@ class FeedMixerTest {
         val video = createTestVideo("2", "c2", "So, Apple Intelligence is Kinda Broken Right Now")
         val channel = com.amatsagu.reson.model.Channel(id = "c2", title = "SAMTIME")
         val query = DynamicTopicExtractor.extractSearchQuery(video, channel)
-        assertTrue("Expected topic query to contain Apple Intelligence, got '$query'",
-            query?.contains("Apple Intelligence", ignoreCase = true) == true)
-        assertFalse("Expected leading conversational filler 'So' stripped, got '$query'",
-            query?.startsWith("So", ignoreCase = true) == true)
+        assertTrue(
+            "Expected topic query to contain Apple Intelligence, got '$query'",
+            query?.contains("Apple Intelligence", ignoreCase = true) == true,
+        )
+        assertFalse(
+            "Expected leading conversational filler 'So' stripped, got '$query'",
+            query?.startsWith("So", ignoreCase = true) == true,
+        )
     }
 
     @Test
@@ -122,8 +130,10 @@ class FeedMixerTest {
         val video = createTestVideo("3", "c3", "3 MITY O WYPALENIU")
         val channel = com.amatsagu.reson.model.Channel(id = "c3", title = "Nauka. To Lubię")
         val query = DynamicTopicExtractor.extractSearchQuery(video, channel)
-        assertTrue("Expected Polish topic keywords preserved, got '$query'",
-            query?.contains("WYPALENIU", ignoreCase = true) == true && query.contains("MITY", ignoreCase = true))
+        assertTrue(
+            "Expected Polish topic keywords preserved, got '$query'",
+            (query?.contains("WYPALENIU", ignoreCase = true) == true) && (query.contains("MITY", ignoreCase = true)),
+        )
     }
 
     @Test

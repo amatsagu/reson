@@ -183,8 +183,8 @@ class YtDlpManagerTest {
         assertTrue(YtDlpManager.isHandleExactMatch("@SmugAlana", "@SmugAlana"))
         assertTrue(YtDlpManager.isHandleExactMatch("smugalana", "@SmugAlana"))
         assertTrue(YtDlpManager.isHandleExactMatch("SmugVODs", "@SmugVODs"))
-        org.junit.Assert.assertFalse(YtDlpManager.isHandleExactMatch("smug alana", "@SmugAlana"))
-        org.junit.Assert.assertFalse(YtDlpManager.isHandleExactMatch("smug", "@SmugAlana"))
+        assertFalse(YtDlpManager.isHandleExactMatch("smug alana", "@SmugAlana"))
+        assertFalse(YtDlpManager.isHandleExactMatch("smug", "@SmugAlana"))
     }
 
     @Test
@@ -227,8 +227,8 @@ class YtDlpManagerTest {
         assertTrue(YtDlpManager.isRateLimitError(RuntimeException("Sign in to confirm you are not a bot")))
         assertTrue(YtDlpManager.isRateLimitError(RuntimeException("YouTube returned a CAPTCHA challenge")))
         assertTrue(YtDlpManager.isRateLimitError(RuntimeException("Client temporarily blocked due to rate limit")))
-        org.junit.Assert.assertFalse(YtDlpManager.isRateLimitError(RuntimeException("Video unavailable")))
-        org.junit.Assert.assertFalse(YtDlpManager.isRateLimitError(RuntimeException("Unknown format 140")))
+        assertFalse(YtDlpManager.isRateLimitError(RuntimeException("Video unavailable")))
+        assertFalse(YtDlpManager.isRateLimitError(RuntimeException("Unknown format 140")))
     }
 
     @Test
@@ -262,9 +262,9 @@ class YtDlpManagerTest {
         assertTrue(YtDlpManager.isLockedVideoTitle("Live Q&A - Members Only"))
         assertTrue(YtDlpManager.isLockedVideoTitle("Special Post [Member-Only]"))
         assertTrue(YtDlpManager.isLockedVideoTitle("Podcast #10 [Subscribers Only]"))
-        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoTitle("JavaScript in 100 Seconds"))
-        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoTitle("Regular Member Podcast #42"))
-        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoTitle("How to get channel members"))
+        assertFalse(YtDlpManager.isLockedVideoTitle("JavaScript in 100 Seconds"))
+        assertFalse(YtDlpManager.isLockedVideoTitle("Regular Member Podcast #42"))
+        assertFalse(YtDlpManager.isLockedVideoTitle("How to get channel members"))
     }
 
     @Test
@@ -288,7 +288,7 @@ class YtDlpManagerTest {
         val jsonPublic = org.json.JSONObject().put("title", "Normal Public Video")
             .put("availability", "public")
             .put("requires_payment", false)
-        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideo(jsonPublic))
+        assertFalse(YtDlpManager.isLockedVideo(jsonPublic))
     }
 
     @Test
@@ -296,8 +296,8 @@ class YtDlpManagerTest {
         assertTrue(YtDlpManager.isLockedVideoError(RuntimeException("Join this channel to get access to members-only content")))
         assertTrue(YtDlpManager.isLockedVideoError(RuntimeException("This video is available to this channel's members on level VIP")))
         assertTrue(YtDlpManager.isLockedVideoError(RuntimeException("Private video. Sign in to view.")))
-        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("HTTP Error 429: Too Many Requests")))
-        org.junit.Assert.assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("Network connection timed out")))
+        assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("HTTP Error 429: Too Many Requests")))
+        assertFalse(YtDlpManager.isLockedVideoError(RuntimeException("Network connection timed out")))
     }
 
     @Test

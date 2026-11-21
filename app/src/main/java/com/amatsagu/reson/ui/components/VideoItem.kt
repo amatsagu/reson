@@ -152,10 +152,10 @@ fun VideoItem(
 fun DualActionCapsule(
     isDownloaded: Boolean,
     downloadProgress: Float?,
-    isQueued: Boolean = false,
     onPlayClick: () -> Unit,
     onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isQueued: Boolean = false,
     isPlaying: Boolean = false,
     isBuffering: Boolean = false,
 ) {

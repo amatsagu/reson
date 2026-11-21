@@ -76,9 +76,9 @@ fun LibraryScreen(
     onDownloadVideo: (Video) -> Unit,
     onClearHistory: () -> Unit,
     contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
     queuedDownloadIds: Set<String> = emptySet(),
     downloadingProgressMap: Map<String, Float> = emptyMap(),
-    modifier: Modifier = Modifier
 ) {
     var subView by remember { mutableStateOf(LibrarySubView.Overview) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
@@ -215,9 +215,9 @@ private fun LibraryOverviewView(
     onShowFullHistory: () -> Unit,
     onShowFullDownloads: () -> Unit,
     contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
     queuedDownloadIds: Set<String> = emptySet(),
     downloadingProgressMap: Map<String, Float> = emptyMap(),
-    modifier: Modifier = Modifier
 ) {
     val top5History = remember(historyVideos) { historyVideos.take(5) }
     val top5Downloads = remember(downloadedVideos) { downloadedVideos.take(5) }
@@ -254,7 +254,7 @@ private fun LibraryOverviewView(
             ) { video ->
                 val isVideoPlaying = video.id == currentPlayingVideoId && isPlaying
                 val isVideoBuffering = video.id == currentPlayingVideoId && isAudioBuffering
-                val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                val isQueued = (video.id in queuedDownloadIds) || video.isDownloadQueued
                 val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                 VideoItem(
                     video = video,
@@ -374,9 +374,9 @@ private fun FullListView(
     emptyDesc: String,
     headerAction: (@Composable () -> Unit)?,
     contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
     queuedDownloadIds: Set<String> = emptySet(),
     downloadingProgressMap: Map<String, Float> = emptyMap(),
-    modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier

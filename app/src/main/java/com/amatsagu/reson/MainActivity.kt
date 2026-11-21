@@ -27,8 +27,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.TravelExplore
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -183,7 +181,6 @@ fun ResonApp(viewModel: MainViewModel) {
                             isPlaybackActive = uiState.isPlaying,
                             isAudioBuffering = uiState.isAudioBuffering,
                             onSelectChannel = { viewModel.selectChannelFilter(it) },
-                            onFollowClick = { viewModel.toggleFollowChannel(it) },
                             onPlayVideo = { viewModel.playVideo(it) },
                             onDownloadVideo = { viewModel.downloadVideo(it) },
                             onLoadMore = { viewModel.loadMoreChannelVideos() },
@@ -295,7 +292,7 @@ fun FeedScreen(
         derivedStateOf {
             val total = listState.layoutInfo.totalItemsCount
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            total > 0 && lastVisible >= total - 3
+            (total > 0) && (lastVisible >= (total - 3))
         }
     }
 
@@ -569,7 +566,6 @@ fun ChannelsScreen(
     isPlaybackActive: Boolean = false,
     isAudioBuffering: Boolean = false,
     onSelectChannel: (String?) -> Unit,
-    onFollowClick: (Channel) -> Unit,
     onPlayVideo: (Video) -> Unit,
     onDownloadVideo: (Video) -> Unit,
     onLoadMore: () -> Unit,

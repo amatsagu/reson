@@ -35,7 +35,7 @@ object YouTubeRssFetcher {
      */
     suspend fun fetchChannelVideos(
         channelId: String,
-        fallbackChannelTitle: String = ""
+        fallbackChannelTitle: String = "",
     ): Result<List<Video>> = withContext(ResonDispatchers.Network) {
         val cleanId = channelId.trim()
         if (cleanId.isEmpty() || !cleanId.startsWith("UC")) {
@@ -68,7 +68,7 @@ object YouTubeRssFetcher {
             }
 
             val responseCode = connection.responseCode
-            if (responseCode == 429 || responseCode == 503) {
+            if ((responseCode == 429) || (responseCode == 503)) {
                 // Rate limited: activate 5-minute cooldown to protect client IP
                 rateLimitCooldownUntilMs = System.currentTimeMillis() + (5 * 60 * 1000L)
                 Log.w(TAG, "Received HTTP $responseCode from YouTube RSS for $cleanId. Cooldown activated for 5m.")

@@ -38,7 +38,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -80,7 +79,6 @@ import java.util.Locale
  * 2. Data control (Export, Import, Clear history, Delete all with confirmation dialogs)
  * 3. User preferences (Theme color picker, Recommendations toggle, Language selection)
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     ytDlpState: YtDlpState,
@@ -96,10 +94,10 @@ fun SettingsScreen(
     onSelfRepair: () -> Unit,
     onExportDatabase: (OutputStream, (Boolean, String?) -> Unit) -> Unit,
     onImportDatabase: (InputStream, (Boolean, String?) -> Unit) -> Unit,
-    onClearHistory: () -> Unit = {},
     onDeleteAllData: (() -> Unit) -> Unit,
     contentPadding: PaddingValues,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClearHistory: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()

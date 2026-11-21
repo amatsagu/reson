@@ -10,12 +10,12 @@ import com.amatsagu.reson.model.Video
 object DynamicTopicExtractor {
 
     private val LEADING_FILLERS = setOf(
-        "so", "why", "how", "what", "here", "is", "the", "a", "an", "this", "that", "to", "my"
+        "so", "why", "how", "what", "here", "is", "the", "a", "an", "this", "that", "to", "my",
     )
 
     private val EPISODE_PATTERN = Regex(
         "^(#|ep\\.?|episode|part|vol\\.?|sezon|odc\\.?|vlog)\\s*\\d+.*$",
-        RegexOption.IGNORE_CASE
+        RegexOption.IGNORE_CASE,
     )
 
     /**
@@ -28,15 +28,17 @@ object DynamicTopicExtractor {
 
         // 1. Split compound titles by common video title separators (e.g. "Title | Series #1", "Topic: Subtopic")
         val segments = title.split(Regex("[|:—–•/\\\\]+"))
+            .asSequence()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
+            .toList()
 
         // 2. Select the most descriptive segment (discarding episode counters, short tags, and channel names)
         val channelName = channel?.title?.trim().orEmpty()
         val descriptiveSegment = segments.firstOrNull { segment ->
             val isEpisodeCounter = segment.matches(EPISODE_PATTERN)
             val isChannelName = channelName.isNotEmpty() && segment.equals(channelName, ignoreCase = true)
-            !isEpisodeCounter && !isChannelName && segment.length >= 6
+            (!isEpisodeCounter) && (!isChannelName) && (segment.length >= 6)
         } ?: segments.maxByOrNull { it.length } ?: title
 
         // 3. Strip bracketed noise (e.g. "[Official Video]", "(4K 60FPS)", "[CC]")

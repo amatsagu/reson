@@ -1,9 +1,11 @@
+package com.amatsagu.reson
+
 import com.amatsagu.reson.ui.components.AVAILABLE_PLAYBACK_SPEEDS
 import com.amatsagu.reson.ui.components.formatPlaybackSpeed
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class ExampleUnitTest {
+class PlaybackUnitTest {
     @Test
     fun playbackSpeedOptions_containsExpectedTempos() {
         assertEquals(listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f), AVAILABLE_PLAYBACK_SPEEDS)

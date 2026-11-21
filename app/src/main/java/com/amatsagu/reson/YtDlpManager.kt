@@ -17,7 +17,6 @@ import com.amatsagu.reson.model.SearchResultItem
 import com.amatsagu.reson.model.Video
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel as KChannel
 import kotlinx.coroutines.delay
@@ -349,9 +348,9 @@ class YtDlpManager private constructor(private val appContext: Context) {
             val nowSec = System.currentTimeMillis() / 1000L
             val targetSec = if (timestampSec > 0) {
                 timestampSec
-            } else if (rawUploadDate.length == 8 && rawUploadDate.all { it.isDigit() }) {
+            } else if ((rawUploadDate.length == 8) && rawUploadDate.all { it.isDigit() }) {
                 try {
-                    val sdf = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).apply {
+                    val sdf = java.text.SimpleDateFormat("yyyyMMdd", Locale.US).apply {
                         timeZone = java.util.TimeZone.getTimeZone("UTC")
                     }
                     val parsed = sdf.parse(rawUploadDate)
@@ -364,7 +363,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
 
             if (targetSec <= 0L) {
-                return if (rawUploadDate.isNotBlank()) rawUploadDate else ""
+                return rawUploadDate.ifBlank { "" }
             }
 
             val diffSec = maxOf(0L, nowSec - targetSec)

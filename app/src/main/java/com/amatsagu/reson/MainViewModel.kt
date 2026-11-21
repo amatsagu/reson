@@ -172,7 +172,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val freshResult = ytDlpManager.getAudioStreamUrl(
                 videoId = video.id,
                 forceRefresh = true,
-                priority = TaskPriority.IMMEDIATE
+                priority = TaskPriority.IMMEDIATE,
             )
             if (freshResult is Result.Success) {
                 audioPlayerManager.resumeWithFreshUrl(freshResult.data, positionMs)
@@ -559,7 +559,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (videoResult) {
                 is Result.Success -> {
                     val rawVideos = videoResult.data
-                    val rawChannels = (if (channelResult is Result.Success) channelResult.data else emptyList()).toMutableList()
+                    val rawChannels = ((channelResult as? Result.Success)?.data ?: emptyList()).toMutableList()
 
                     // Also harvest channel candidates directly from rawVideos if not already present in rawChannels
                     val existingChannelIds = rawChannels.map { it.id }.toMutableSet()
@@ -660,7 +660,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 maxResults = PAGE_SIZE
                             )
                         }
-                        if (result is Result.Success && result.data.isNotEmpty()) {
+                        if ((result is Result.Success) && result.data.isNotEmpty()) {
                             databaseManager.upsertVideos(result.data, defaultChannelId = channelId)
                             databaseManager.getVideosForChannel(channelId, limit = PAGE_SIZE, offset = 0)
                         } else {
@@ -1397,7 +1397,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        super.onCleared()
         syncJob?.cancel()
         searchJob?.cancel()
         suggestJob?.cancel()
@@ -1697,20 +1696,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun addLog(message: String) {
         val timestamp = timeFormat.format(Date())
         Log.i("Reson:VM", "[$timestamp] $message")
-    }
-
-    /**
-     * Fresh startup state: both continue listening and recommended feeds start empty
-     * until the user searches, follows channels, or plays content.
-     */
-    private fun loadDefaultContent() {
-        _uiState.update {
-            it.copy(
-                continueVideos = emptyList(),
-                feedVideos = emptyList(),
-                currentPlayingVideo = null,
-            )
-        }
     }
 
     companion object {

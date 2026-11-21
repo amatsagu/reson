@@ -11,7 +11,7 @@ import com.amatsagu.reson.model.Video
  *    and disperses them across a sliding window (by default 3 consecutive items).
  * 3. Creator Round-Robin: Alternates between different creators within each pool rather
  *    than dumping multiple videos from a single creator.
- * 4. Strict De-Duplication & Exclusion: Never emits duplicates or any video in [excludeIds]
+ * 4. Strict De-Duplication & Exclusion: Never emits duplicates or any video in `excludeIds`
  *    (e.g. watched history or continue listening items), and silences YouTube Shorts.
  * 5. Hidden Bias Demotion: Gives lower priority to non-followed channels and videos with
  *    words "news" or "america" (bias is completely ignored if the channel is followed).
@@ -26,22 +26,21 @@ object FeedMixer {
         limit: Int = 30,
         channelWindowSize: Int = 3,
         followedChannelIds: Set<String> = emptySet(),
-        followedChannelTitles: Set<String> = emptySet()
+        followedChannelTitles: Set<String> = emptySet(),
     ): List<Video> {
         val cleanFollowed = followedUnwatched
-            .filterNot { it.id in excludeIds || YtDlpManager.isShortVideo(it) }
+            .filterNot { (it.id in excludeIds) || YtDlpManager.isShortVideo(it) }
         val cleanRecommended = recommended
-            .filterNot { it.id in excludeIds || YtDlpManager.isShortVideo(it) }
+            .filterNot { (it.id in excludeIds) || YtDlpManager.isShortVideo(it) }
 
         fun isBiasedVideo(v: Video): Boolean {
-            val isFollowed = v.channelId in followedChannelIds || v.channelTitle in followedChannelTitles
-            if (isFollowed) return false
-            return YtDlpManager.hasNewsOrAmericaBias(v.title, v.channelTitle)
+            val isFollowed = (v.channelId in followedChannelIds) || (v.channelTitle in followedChannelTitles)
+            return !isFollowed && YtDlpManager.hasNewsOrAmericaBias(v.title, v.channelTitle)
         }
 
         fun isBiasedChannelKey(key: String): Boolean {
-            if (key in followedChannelIds || key in followedChannelTitles) return false
-            return YtDlpManager.hasNewsOrAmericaBias(title = "", channelTitle = key)
+            val isFollowed = (key in followedChannelIds) || (key in followedChannelTitles)
+            return !isFollowed && YtDlpManager.hasNewsOrAmericaBias(title = "", channelTitle = key)
         }
 
         // Group videos by channel key (channelId if non-empty, otherwise channelTitle)
@@ -69,7 +68,7 @@ object FeedMixer {
 
             fun pickKeyFrom(keys: Collection<String>): String? {
                 // 1. Pick a channel NOT present in recent sliding window
-                var chosen = keys.firstOrNull { it !in recentChannels && !map[it].isNullOrEmpty() }
+                var chosen = keys.firstOrNull { (it !in recentChannels) && !map[it].isNullOrEmpty() }
 
                 // 2. If all in sliding window, pick one that is NOT the immediate last channel
                 if (chosen == null) {
