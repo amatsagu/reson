@@ -61,12 +61,6 @@ class ChannelDao {
         return affected > 0
     }
 
-    fun isChannelFollowed(db: SQLiteDatabase, channelId: String): Boolean {
-        db.rawQuery("SELECT 1 FROM channels WHERE id = ? AND is_followed = 1 LIMIT 1", arrayOf(channelId)).use { cursor ->
-            return cursor.moveToFirst()
-        }
-    }
-
     fun getFollowedChannels(db: SQLiteDatabase): List<Channel> {
         val query = "SELECT * FROM channels WHERE is_followed = 1 ORDER BY followed_at DESC"
         return queryChannels(db, query)
@@ -82,21 +76,11 @@ class ChannelDao {
         return ids
     }
 
-    fun getChannelById(db: SQLiteDatabase, channelId: String): Channel? {
-        db.rawQuery("SELECT * FROM channels WHERE id = ? LIMIT 1", arrayOf(channelId)).use { cursor ->
-            return if (cursor.moveToFirst()) cursorToChannel(cursor, ChannelCursorIndices(cursor)) else null
-        }
-    }
-
     fun updateLastSyncTime(db: SQLiteDatabase, channelId: String, timestamp: Long = System.currentTimeMillis()) {
         val values = ContentValues().apply {
             put("last_sync_at", timestamp)
         }
         db.update("channels", values, "id = ?", arrayOf(channelId))
-    }
-
-    fun deleteChannel(db: SQLiteDatabase, channelId: String): Boolean {
-        return db.delete("channels", "id = ?", arrayOf(channelId)) > 0
     }
 
     fun countFollowed(db: SQLiteDatabase): Long {
@@ -108,7 +92,7 @@ class ChannelDao {
     private fun queryChannels(
         db: SQLiteDatabase,
         sql: String,
-        selectionArgs: Array<String>? = null
+        selectionArgs: Array<String>? = null,
     ): List<Channel> {
         val channels = mutableListOf<Channel>()
         db.rawQuery(sql, selectionArgs).use { cursor ->

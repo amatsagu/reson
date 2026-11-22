@@ -66,7 +66,7 @@ object DynamicTopicExtractor {
         val finalTokens = if (contentTokens.size >= 2) contentTokens else tokens
 
         // 7. Take 2 to 5 descriptive words to form a focused, high-relevance search query
-        val query = finalTokens.take(5).joinToString(" ").trim()
+        val query = finalTokens.asSequence().take(5).joinToString(" ").trim()
         return if (query.length >= 4) query else null
     }
 }

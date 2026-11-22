@@ -73,7 +73,8 @@ object FeedMixer {
                 // 2. If all in sliding window, pick one that is NOT the immediate last channel
                 if (chosen == null) {
                     chosen = keys
-                        .filter { !avoidImmediate || it != lastChannel }
+                        .asSequence()
+                        .filter { (!avoidImmediate) || (it != lastChannel) }
                         .minByOrNull { key ->
                             val idx = recentChannels.indexOf(key)
                             if (idx == -1) -1 else idx
@@ -114,7 +115,7 @@ object FeedMixer {
         var slotIndex = 0
         val totalAvailable = cleanFollowed.size + cleanRecommended.size
 
-        while (result.size < limit && result.size < totalAvailable) {
+        while ((result.size < limit) && (result.size < totalAvailable)) {
             // Target cadence: 25% Followed (slotIndex % 4 == 0), 75% Recommended (slotIndex % 4 != 0)
             val wantFollowed = (slotIndex % 4 == 0)
             slotIndex++

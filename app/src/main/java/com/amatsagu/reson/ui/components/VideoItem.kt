@@ -68,7 +68,7 @@ fun VideoItem(
                 modifier = Modifier
                     .size(width = 96.dp, height = 54.dp)
                     .clip(VideoThumbnailShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
             )
         } else {
             Box(
@@ -105,7 +105,7 @@ fun VideoItem(
             )
 
             val duration = when {
-                (video.durationText.isNotBlank() && video.durationText != "Unknown") -> video.durationText
+                (video.durationText.isNotBlank() && (video.durationText != "Unknown")) -> video.durationText
                 video.durationSeconds > 0 -> com.amatsagu.reson.YtDlpManager.formatDuration(video.durationSeconds)
                 video.playbackDurationMs > 0L -> com.amatsagu.reson.YtDlpManager.formatDuration((video.playbackDurationMs / 1000L).toInt())
                 else -> ""

@@ -8,8 +8,6 @@ import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import com.yausername.youtubedl_android.YoutubeDL.UpdateStatus
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
-import com.yausername.youtubedl_android.YoutubeDLResponse
-import com.yausername.youtubedl_android.mapper.VideoInfo
 import com.yausername.ffmpeg.FFmpeg
 import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import com.amatsagu.reson.model.Channel
@@ -28,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
 import java.io.File
 import java.net.URLEncoder
 import java.util.Locale
@@ -65,7 +64,7 @@ private class QueuedTask<T>(
     val priority: TaskPriority,
     val tag: String,
     val block: suspend () -> T,
-    val deferred: CompletableDeferred<T>
+    val deferred: CompletableDeferred<T>,
 ) : Comparable<QueuedTask<*>> {
     override fun compareTo(other: QueuedTask<*>): Int {
         val pComp = other.priority.weight.compareTo(this.priority.weight)
@@ -282,8 +281,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
          * Checks whether a video title indicates a YouTube Short.
          */
         fun isShortVideoTitle(title: String): Boolean {
-            if (title.isBlank()) return false
-            return SHORTS_TITLE_REGEX.containsMatchIn(title)
+            return title.isNotBlank() && SHORTS_TITLE_REGEX.containsMatchIn(title)
         }
 
         /**
@@ -319,21 +317,16 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
 
             val duration = json.optInt("duration", 0)
-            if (duration in 1..60) {
-                return true
-            }
-
-            return false
+            return duration in 1..60
         }
 
         /**
          * Checks if a domain Video object is a YouTube Short.
          */
         fun isShortVideo(video: Video): Boolean {
-            if (isShortVideoTitle(video.title)) return true
-            if (video.webpageUrl.contains("/shorts/")) return true
-            if (video.durationSeconds in 1..60) return true
-            return false
+            return isShortVideoTitle(video.title) ||
+                    video.webpageUrl.contains("/shorts/") ||
+                    (video.durationSeconds in 1..60)
         }
 
         /**
@@ -391,7 +384,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
             if (diffSec < 86400) {
                 val h = diffSec / 3600
                 val remM = (diffSec % 3600) / 60
-                return if (remM > 0 && h < 6) "${h}h${remM}m ago" else "${h}h ago"
+                return if ((remM > 0) && (h < 6)) "${h}h${remM}m ago" else "${h}h ago"
             }
             val days = diffSec / 86400
             val remH = (diffSec % 86400) / 3600
@@ -480,8 +473,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
             val titleExpanded = title.replace("(?<=[a-z])(?=[A-Z])".toRegex(), " ")
             val handleExpanded = handle.replace("(?<=[a-z])(?=[A-Z])".toRegex(), " ")
-            val qWords = query.lowercase().split("[^a-zA-Z0-9]+".toRegex()).filter { it.isNotEmpty() }.toSet()
-            val tWords = "$titleExpanded $handleExpanded".lowercase().split("[^a-zA-Z0-9]+".toRegex()).filter { it.isNotEmpty() }.toSet()
+            val qWords = query.lowercase().split("[^a-zA-Z0-9]+".toRegex()).asSequence().filter { it.isNotEmpty() }.toSet()
+            val tWords = "$titleExpanded $handleExpanded".lowercase().split("[^a-zA-Z0-9]+".toRegex()).asSequence().filter { it.isNotEmpty() }.toSet()
 
             if (qWords.isNotEmpty() && tWords.isNotEmpty()) {
                 val intersection = qWords.intersect(tWords).size
@@ -500,7 +493,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         fun isHandleExactMatch(query: String, handle: String): Boolean {
             val q = query.trim().lowercase().removePrefix("@")
             val h = handle.trim().lowercase().removePrefix("@")
-            return q.isNotEmpty() && q == h
+            return (q.isNotEmpty()) && (q == h)
         }
 
         /**
@@ -552,7 +545,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 ch to totalScore
             }
 
-            return scored.sortedByDescending { it.second }.map { it.first }
+            return scored.asSequence().sortedByDescending { it.second }.map { it.first }.toList()
         }
 
         /**
@@ -636,7 +629,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 // If device is offline, pause queue until network is validated
                 while (!networkMonitor.isOnline() && isActive) {
                     Log.d(TAG, "yt-dlp queue paused: device is offline. Waiting for network...")
-                    delay(800)
+                    delay(800.milliseconds)
                 }
 
                 val now = System.currentTimeMillis()
@@ -644,7 +637,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 if (now < rateLimitCooldownUntilEpochMs && task.priority != TaskPriority.IMMEDIATE) {
                     val waitMs = (rateLimitCooldownUntilEpochMs - now).coerceAtLeast(0L)
                     Log.w(TAG, "yt-dlp queue under rate-limit cooldown (${waitMs / 1000}s remaining). Waiting before executing '${task.tag}'...")
-                    delay(waitMs.coerceAtMost(3000L))
+                    delay(waitMs.coerceAtMost(3000L).milliseconds)
                     priorityQueue.offer(task)
                     continue
                 }
@@ -692,16 +685,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
             }
         }
-    }
-
-    /**
-     * Manually resets rate-limit circuit breaker and returns status to Normal.
-     */
-    fun resetRateLimitStatus() {
-        consecutiveRateLimits = 0
-        rateLimitCooldownUntilEpochMs = 0L
-        _rateLimitStatus.value = RateLimitStatus.Normal
-        wakeSignal.trySend(Unit)
     }
 
     /**
@@ -894,40 +877,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     _state.value = YtDlpState.Error(message = errorMsg, canRecover = true)
                     Result.Failure(e, errorMsg)
                 }
-            }
-        }
-    }
-
-    /**
-     * Fetches metadata for a given YouTube URL or video.
-     */
-    suspend fun fetchVideoInfo(
-        url: String,
-        autoRetryWithUpdate: Boolean = true,
-        priority: TaskPriority = TaskPriority.INTERACTIVE
-    ): Result<VideoInfo> = withContext(networkDispatcher) {
-        executeQueued(priority, "Info:$url") {
-            try {
-                ensureReady()
-                val info = YoutubeDL.getInstance().getInfo(url)
-                Result.Success(info)
-            } catch (e: YoutubeDLException) {
-                Log.w(TAG, "yt-dlp extraction error for URL: $url: ${e.message}")
-                if (autoRetryWithUpdate) {
-                    Log.i(TAG, "Attempting auto-patch update and retry...")
-                    val updateResult = update(UpdateChannel.STABLE, priority = TaskPriority.IMMEDIATE)
-                    if (updateResult is Result.Success) {
-                        return@executeQueued try {
-                            val retryInfo = YoutubeDL.getInstance().getInfo(url)
-                            Result.Success(retryInfo)
-                        } catch (retryError: Throwable) {
-                            Result.Failure(retryError, "Extraction failed even after updating: ${retryError.message}")
-                        }
-                    }
-                }
-                Result.Failure(e, e.message ?: "Failed to fetch video information")
-            } catch (e: Throwable) {
-                Result.Failure(e, e.message ?: "Unexpected error")
             }
         }
     }
@@ -1275,24 +1224,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Executes custom yt-dlp arguments and returns the raw response.
-     */
-    suspend fun executeRaw(
-        request: YoutubeDLRequest,
-        priority: TaskPriority = TaskPriority.INTERACTIVE
-    ): Result<YoutubeDLResponse> = withContext(networkDispatcher) {
-        executeQueued(priority, "Raw") {
-            try {
-                ensureReady()
-                val response = YoutubeDL.getInstance().execute(request)
-                Result.Success(response)
-            } catch (e: Throwable) {
-                Result.Failure(e, e.message ?: "Command execution failed")
-            }
-        }
-    }
-
-    /**
      * Performs a fast search using yt-dlp with --flat-playlist and Android player client.
      * Supports windowed pagination via startIndex and maxResults.
      */
@@ -1365,7 +1296,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                             rawTimestamp
                         } else if (rawDate.length == 8 && rawDate.all { it.isDigit() }) {
                             try {
-                                val sdf = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).apply {
+                                val sdf = java.text.SimpleDateFormat("yyyyMMdd", Locale.US).apply {
                                     timeZone = java.util.TimeZone.getTimeZone("UTC")
                                 }
                                 sdf.parse(rawDate)?.time?.div(1000L) ?: 0L
@@ -1635,13 +1566,13 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     val keys = obj.keys()
                     while (keys.hasNext()) {
                         val k = keys.next()
-                        extractRenderersRecursive(obj.get(k), out)
+                        extractRenderersRecursive(obj[k], out)
                     }
                 }
             }
             is org.json.JSONArray -> {
                 for (i in 0 until obj.length()) {
-                    extractRenderersRecursive(obj.get(i), out)
+                    extractRenderersRecursive(obj[i], out)
                 }
             }
         }
@@ -1700,7 +1631,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         val thumbs = obj.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
             ?: obj.optJSONObject("image")?.optJSONArray("sources")
 
-        if (thumbs != null && thumbs.length() > 0) {
+        if (thumbs != null && (thumbs.length() > 0)) {
             for (i in 0 until thumbs.length()) {
                 val t = thumbs.optJSONObject(i) ?: continue
                 val u = t.optCleanString("url")

@@ -119,13 +119,13 @@ fun PlaybackSpeedDialog(
             Text(
                 text = stringResource(R.string.playback_speed_title),
                 fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
             )
         },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 AVAILABLE_PLAYBACK_SPEEDS.forEach { speed ->
                     val isSelected = currentSpeed == speed
@@ -186,7 +186,7 @@ fun InteractiveResonProgressBar(
     trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
     progressColor: Color = MaterialTheme.colorScheme.primary,
 ) {
-    var isDragging by remember { mutableStateOf(false) }
+    var isDragging by remember { mutableStateOf(value = false) }
     var dragRatio by remember { mutableFloatStateOf(0f) }
 
     Box(
@@ -248,23 +248,6 @@ fun InteractiveResonProgressBar(
                     }
                 }
             }
-    )
-}
-
-@Composable
-fun InteractiveResonProgressBar(
-    progress: Float,
-    onSeek: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-    trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
-    progressColor: Color = MaterialTheme.colorScheme.primary,
-) {
-    InteractiveResonProgressBar(
-        progress = { progress },
-        onSeek = onSeek,
-        modifier = modifier,
-        trackColor = trackColor,
-        progressColor = progressColor
     )
 }
 
@@ -363,7 +346,7 @@ fun BottomAudioPlayerContent(
     }
 
     var currentPos by remember(video.id) { mutableLongStateOf(positionMs()) }
-    var showSpeedDialog by remember { mutableStateOf(false) }
+    var showSpeedDialog by remember { mutableStateOf(value = false) }
 
     LaunchedEffect(isPlaying, video.id) {
         if (isPlaying) {
@@ -544,37 +527,6 @@ fun BottomAudioPlayerContent(
     }
 }
 
-@Composable
-fun BottomAudioPlayerContent(
-    video: Video,
-    isPlaying: Boolean,
-    isBuffering: Boolean,
-    positionMs: Long,
-    durationMs: Long,
-    onPlayPauseClick: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onCloseClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    statusHint: String? = null,
-    playbackSpeed: Float = 1.0f,
-    onSpeedChange: (Float) -> Unit = {},
-) {
-    BottomAudioPlayerContent(
-        video = video,
-        isPlaying = isPlaying,
-        isBuffering = isBuffering,
-        positionMs = { positionMs },
-        durationMs = durationMs,
-        onPlayPauseClick = onPlayPauseClick,
-        onSeek = onSeek,
-        onCloseClick = onCloseClick,
-        modifier = modifier,
-        statusHint = statusHint,
-        playbackSpeed = playbackSpeed,
-        onSpeedChange = onSpeedChange
-    )
-}
-
 /**
  * Modern unified bottom container merging the active audio player and the 3-tab navigation bar
  * seamlessly into a single cohesive Material 3 surface.
@@ -613,7 +565,7 @@ fun ResonUnifiedBottomBar(
                 .fillMaxWidth()
                 .navigationBarsPadding()
         ) {
-            val showBanner = !isBannerDismissed && (isOffline || (isRateLimitBlocked && rateLimitMessage != null))
+            val showBanner = !isBannerDismissed && (isOffline || (isRateLimitBlocked && (rateLimitMessage != null)))
             AnimatedVisibility(
                 visible = showBanner,
                 enter = expandVertically() + fadeIn(),
@@ -681,13 +633,12 @@ fun NetworkStatusBanner(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isError = isRateLimitBlocked
-    val containerColor = if (isError) {
+    val containerColor = if (isRateLimitBlocked) {
         MaterialTheme.colorScheme.errorContainer
     } else {
         MaterialTheme.colorScheme.surfaceContainerHighest
     }
-    val contentColor = if (isError) {
+    val contentColor = if (isRateLimitBlocked) {
         MaterialTheme.colorScheme.onErrorContainer
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
@@ -704,7 +655,7 @@ fun NetworkStatusBanner(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = if (isError) Icons.Outlined.Warning else Icons.Outlined.WifiOff,
+                imageVector = if (isRateLimitBlocked) Icons.Outlined.Warning else Icons.Outlined.WifiOff,
                 contentDescription = null,
                 tint = contentColor,
                 modifier = Modifier.size(18.dp)
@@ -713,7 +664,7 @@ fun NetworkStatusBanner(
             Spacer(modifier = Modifier.width(10.dp))
 
             Text(
-                text = if (isError) {
+                text = if (isRateLimitBlocked) {
                     rateLimitMessage ?: stringResource(R.string.network_youtube_blocked_banner)
                 } else {
                     stringResource(R.string.network_offline_banner)
@@ -740,42 +691,5 @@ fun NetworkStatusBanner(
                 )
             }
         }
-    }
-}
-
-/**
- * Legacy standalone audio player composable maintained for backward compatibility.
- */
-@Composable
-fun BottomAudioPlayer(
-    video: Video,
-    isPlaying: Boolean,
-    isBuffering: Boolean,
-    positionMs: Long,
-    durationMs: Long,
-    onPlayPauseClick: () -> Unit,
-    onSeek: (Long) -> Unit,
-    onCloseClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
-        shadowElevation = 4.dp
-    ) {
-        BottomAudioPlayerContent(
-            video = video,
-            isPlaying = isPlaying,
-            isBuffering = isBuffering,
-            positionMs = positionMs,
-            durationMs = durationMs,
-            onPlayPauseClick = onPlayPauseClick,
-            onSeek = onSeek,
-            onCloseClick = onCloseClick
-        )
     }
 }

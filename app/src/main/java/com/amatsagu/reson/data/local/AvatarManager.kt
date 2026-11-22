@@ -37,7 +37,7 @@ object AvatarManager {
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 setRequestProperty("Accept-Language", "en-US,en;q=0.9")
             }
-            if (connection.responseCode in 200..299) {
+            if ((connection.responseCode in 200..299)) {
                 val html = connection.inputStream.bufferedReader().use { it.readText() }
                 val match = Regex("""<meta property="og:image" content="([^"]+)"""").find(html)
                 match?.groupValues?.get(1)

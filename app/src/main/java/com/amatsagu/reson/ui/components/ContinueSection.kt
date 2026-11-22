@@ -68,7 +68,7 @@ fun ContinueSection(
         derivedStateOf {
             val total = rowState.layoutInfo.totalItemsCount
             val lastVisible = rowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            total > 0 && lastVisible >= total - 2
+            (total > 0) && (lastVisible >= total - 2)
         }
     }
 
@@ -82,7 +82,7 @@ fun ContinueSection(
         AdaptiveSectionHeader(
             fullTitle = stringResource(R.string.section_continue_listening),
             shortTitle = stringResource(R.string.section_continue_short),
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
 
         LazyRow(

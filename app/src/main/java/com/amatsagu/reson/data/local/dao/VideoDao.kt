@@ -21,7 +21,7 @@ class VideoDao {
             values.remove("created_at")
             val existing = getVideoById(db, video.id)
             if (existing != null) {
-                if (video.playbackPositionMs == 0L && existing.playbackPositionMs > 0L) {
+                if (video.playbackPositionMs == 0L && (existing.playbackPositionMs > 0L)) {
                     values.put("playback_position_ms", existing.playbackPositionMs)
                     values.put("playback_duration_ms", existing.playbackDurationMs)
                     values.put("playback_progress", existing.playbackProgress)
@@ -44,9 +44,7 @@ class VideoDao {
                 }
                 if (!video.isDownloaded && existing.isDownloaded) {
                     values.put("is_downloaded", 1)
-                    if (existing.downloadFilePath != null) {
-                        values.put("download_file_path", existing.downloadFilePath)
-                    }
+                    existing.downloadFilePath?.let { values.put("download_file_path", it) }
                 }
             }
             db.update("videos", values, "id = ?", arrayOf(video.id))
@@ -91,7 +89,7 @@ class VideoDao {
     fun getUnwatchedFollowedVideos(
         db: SQLiteDatabase,
         limit: Int = 30,
-        offset: Int = 0
+        offset: Int = 0,
     ): List<Video> {
         val query = """
             SELECT v.* FROM videos v
@@ -155,34 +153,6 @@ class VideoDao {
     }
 
     /**
-     * Fetches recent videos from subscribed channels, limited to maxPerChannel with pagination support.
-     */
-    fun getRecentVideosFromFollowedChannels(
-        db: SQLiteDatabase,
-        maxPerChannel: Int = 5,
-        limit: Int = 30,
-        offset: Int = 0,
-    ): List<Video> {
-        val query = """
-            SELECT v.* FROM (
-                SELECT v.*, ROW_NUMBER() OVER (
-                    PARTITION BY v.channel_id 
-                    ORDER BY v.release_timestamp DESC, v.created_at DESC
-                ) AS rn
-                FROM videos v
-                INNER JOIN channels c ON v.channel_id = c.id
-                WHERE c.is_followed = 1
-                  AND v.duration_seconds > 60
-                  AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
-            ) v
-            WHERE v.rn <= ?
-            ORDER BY v.release_timestamp DESC, v.created_at DESC
-            LIMIT ? OFFSET ?
-        """.trimIndent()
-        return queryVideos(db, query, arrayOf(maxPerChannel.toString(), limit.toString(), offset.toString()))
-    }
-
-    /**
      * Fetches all videos from followed channels released within the last 1 month (cutoff: minTimestampSec),
      * ordered by release date/time (newest first).
      */
@@ -191,7 +161,7 @@ class VideoDao {
         minTimestampSec: Long,
         minCreatedAtMs: Long,
         limit: Int = 30,
-        offset: Int = 0
+        offset: Int = 0,
     ): List<Video> {
         val query = """
             SELECT v.* FROM videos v

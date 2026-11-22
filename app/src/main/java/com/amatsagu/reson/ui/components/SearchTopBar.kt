@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import kotlin.time.Duration.Companion.milliseconds
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -94,7 +95,7 @@ fun SearchPillBar(
             imageVector = Icons.Default.Search,
             contentDescription = stringResource(R.string.search_content),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(22.dp),
         )
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -192,7 +193,7 @@ fun SearchOverlay(
                 text = query,
                 selection = TextRange(query.length)
             )
-            delay(100)
+            delay(100.milliseconds)
             focusRequester.requestFocus()
             keyboardController?.show()
         }
@@ -254,7 +255,7 @@ fun SearchOverlay(
                         .focusRequester(focusRequester)
                         .onKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyUp &&
-                                (keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter)
+                                ((keyEvent.key == Key.Enter) || (keyEvent.key == Key.NumPadEnter))
                             ) {
                                 keyboardController?.hide()
                                 onSearch(textFieldValue.text)

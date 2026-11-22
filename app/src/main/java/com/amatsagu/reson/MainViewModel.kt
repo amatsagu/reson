@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import java.io.InputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -177,11 +179,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 addLog("Stream recovery failed: ${(freshResult as Result.Failure).message}")
             }
-        }
+        },
     )
-
-    /** Dedicated playback state flow to isolate high-frequency position updates from main UI state */
-    val audioPlaybackState: StateFlow<com.amatsagu.reson.core.player.PlaybackState> = audioPlayerManager.playbackState
 
     private val _databaseStats = MutableStateFlow<DatabaseStats?>(null)
     val databaseStats: StateFlow<DatabaseStats?> = _databaseStats.asStateFlow()
@@ -503,8 +502,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 searchQuery = newQuery,
                 searchResults = if (queryChanged) emptyList() else it.searchResults,
-                canLoadMoreSearch = if (queryChanged) false else it.canLoadMoreSearch,
-                isSearchLoadingMore = if (queryChanged) false else it.isSearchLoadingMore,
+                canLoadMoreSearch = !queryChanged && it.canLoadMoreSearch,
+                isSearchLoadingMore = !queryChanged && it.isSearchLoadingMore,
                 searchErrorRes = null,
                 searchErrorArg = null
             )
@@ -513,7 +512,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         suggestJob?.cancel()
         if (newQuery.trim().length >= 2) {
             suggestJob = viewModelScope.launch {
-                delay(250) // 250ms debounce
+                delay(250.milliseconds) // 250ms debounce
                 val suggestions = SearchSuggestClient.getSuggestions(newQuery)
                 _uiState.update { it.copy(suggestions = suggestions) }
             }
@@ -756,7 +755,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun loadMoreContinueVideos() {
         val state = _uiState.value
-        if (state.isContinueLoadingMore || !state.canLoadMoreContinue || state.continueVideos.isEmpty() || continuePaginationJob?.isActive == true) return
+        if (state.isContinueLoadingMore || !state.canLoadMoreContinue || state.continueVideos.isEmpty() || (continuePaginationJob?.isActive == true)) return
 
         continuePaginationJob = viewModelScope.launch(ResonDispatchers.Database) {
             _uiState.update { it.copy(isContinueLoadingMore = true) }
@@ -764,10 +763,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val nextBatch = databaseManager.getContinueListeningVideos(limit = 10, offset = currentOffset)
 
             _uiState.update { current ->
-                val existingIds = current.continueVideos.map { it.id }.toSet()
+                val existingIds = current.continueVideos.asSequence().map { it.id }.toSet()
                 val newUnique = nextBatch.filter { !existingIds.contains(it.id) }
                 val updatedContinue = current.continueVideos + newUnique
-                val continueIds = updatedContinue.map { it.id }.toSet()
+                val continueIds = updatedContinue.asSequence().map { it.id }.toSet()
 
                 current.copy(
                     continueVideos = updatedContinue,
@@ -813,11 +812,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (result is Result.Success && result.data.isNotEmpty()) {
                         databaseManager.upsertVideos(result.data, defaultChannelId = selectedId)
                         localBatch = databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = currentOffset)
-                        if (localBatch.isEmpty()) {
-                            result.data
-                        } else {
-                            localBatch
-                        }
+                        localBatch.ifEmpty { result.data }
                     } else {
                         emptyList()
                     }
@@ -827,7 +822,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _uiState.update { current ->
-                val existingIds = current.channelVideos.map { it.id }.toSet()
+                val existingIds = current.channelVideos.asSequence().map { it.id }.toSet()
                 val newUnique = nextBatch.filter { !existingIds.contains(it.id) && !YtDlpManager.isShortVideo(it) }
                 current.copy(
                     channelVideos = current.channelVideos + newUnique,
@@ -900,7 +895,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Optimistically update search results immediately for instant UI feedback
         _uiState.update { current ->
             val updatedSearchResults = current.searchResults.map { item ->
-                if (item is SearchResultItem.Creator && item.channel.id == channel.id) {
+                if (item is SearchResultItem.Creator && (item.channel.id == channel.id)) {
                     SearchResultItem.Creator(item.channel.copy(isFollowed = !isCurrentlyFollowed))
                 } else {
                     item
@@ -1000,9 +995,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     // Ensure avatar is cached
                     if (ch.avatarBase64.isBlank()) {
-                        val avatarUrl = if (ch.avatarUrl.isNotBlank()) {
-                            ch.avatarUrl
-                        } else {
+                        val avatarUrl = ch.avatarUrl.ifBlank {
                             AvatarManager.fetchChannelAvatarUrl(ch.id)
                         }
                         if (!avatarUrl.isNullOrBlank()) {
@@ -1109,8 +1102,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         withContext(ResonDispatchers.Network) {
-            val followedIds = followedChannels.map { it.id }.toSet()
-            val followedTitles = followedChannels.map { it.title.lowercase().trim() }.toSet()
+            val followedIds = followedChannels.asSequence().map { it.id }.toSet()
+            val followedTitles = followedChannels.asSequence().map { it.title.lowercase().trim() }.toSet()
 
             val d1 = async {
                 ytDlpManager.searchContent(query1, maxResults = 20, priority = TaskPriority.BACKGROUND)
@@ -1277,7 +1270,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // 20-second watchdog: if stream extraction or audio startup takes >20s, reassure user
         playWatchdogJob = viewModelScope.launch {
-            delay(20_000L)
+            delay(20.seconds)
             if (_uiState.value.isAudioBuffering && _uiState.value.currentPlayingVideo?.id == video.id && !_uiState.value.isPlaying) {
                 _uiState.update { current ->
                     if (current.currentPlayingVideo?.id == video.id && current.isAudioBuffering && !current.isPlaying) {
@@ -1302,8 +1295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 addLog("Failed to upsert video on play: ${e.message}")
             }
             addLog("Extracting audio stream for: ${video.title}...")
-            val streamResult = ytDlpManager.getAudioStreamUrl(video.id)
-            when (streamResult) {
+            when (val streamResult = ytDlpManager.getAudioStreamUrl(video.id)) {
                 is Result.Success -> {
                     addLog("Stream URL obtained. Starting playback...")
                     audioPlayerManager.play(
@@ -1562,9 +1554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val nextVideo = synchronized(downloadQueueList) {
             if (downloadQueueList.isNotEmpty()) downloadQueueList.removeAt(0) else null
         }
-        if (nextVideo != null) {
-            startDownload(nextVideo)
-        }
+        nextVideo?.let { startDownload(it) }
     }
 
     fun clearPlaybackHistory() {
@@ -1587,8 +1577,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (updateJob?.isActive == true) return
         updateJob = viewModelScope.launch(ResonDispatchers.Network) {
             addLog("Triggered manual update check...")
-            val result = ytDlpManager.update(UpdateChannel.STABLE, force = true)
-            when (result) {
+            when (val result = ytDlpManager.update(UpdateChannel.STABLE, force = true)) {
                 is Result.Success -> addLog("Update result: ${result.data}")
                 is Result.Failure -> addLog("Update failed: ${result.message}")
             }

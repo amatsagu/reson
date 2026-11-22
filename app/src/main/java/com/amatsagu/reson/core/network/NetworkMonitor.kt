@@ -7,10 +7,10 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -104,12 +104,12 @@ class NetworkMonitor private constructor(context: Context) {
 
         override fun onLost(network: Network) {
             Log.w(TAG, "Network lost: handle=${network.networkHandle}")
-            handleNetworkLost(network)
+            handleNetworkLost()
         }
 
         override fun onUnavailable() {
             Log.w(TAG, "Network unavailable")
-            handleNetworkLost(null)
+            handleNetworkLost()
         }
     }
 
@@ -161,7 +161,7 @@ class NetworkMonitor private constructor(context: Context) {
             isValidated = isValidated,
             type = type,
             networkHandle = network.networkHandle,
-            displayName = displayName
+            displayName = displayName,
         )
     }
 
@@ -174,7 +174,7 @@ class NetworkMonitor private constructor(context: Context) {
                 when {
                     downKbps >= 100_000 -> NetworkType.CELLULAR_5G
                     downKbps >= 15_000 -> NetworkType.CELLULAR_4G
-                    downKbps in 1..14_999 -> NetworkType.CELLULAR_3G
+                    (downKbps in 1..14_999) -> NetworkType.CELLULAR_3G
                     else -> NetworkType.CELLULAR
                 }
             }
@@ -197,7 +197,7 @@ class NetworkMonitor private constructor(context: Context) {
         // Debounce transitions by 650ms to let DHCP, DNS and routing tables stabilize on tower/Wi-Fi handoff
         debounceJob?.cancel()
         debounceJob = scope.launch {
-            delay(650)
+            delay(650.milliseconds)
             val prev = lastEmittedState
             _networkState.value = newState
 
@@ -215,11 +215,11 @@ class NetworkMonitor private constructor(context: Context) {
         }
     }
 
-    private fun handleNetworkLost(network: Network?) {
+    private fun handleNetworkLost() {
         debounceJob?.cancel()
         debounceJob = scope.launch {
             // Short grace delay (250ms) to see if an immediate handoff to cellular occurs before announcing total loss
-            delay(250)
+            delay(250.milliseconds)
             val currentActive = connectivityManager.activeNetwork
             val currentCaps = currentActive?.let { connectivityManager.getNetworkCapabilities(it) }
 

@@ -81,7 +81,7 @@ fun LibraryScreen(
     downloadingProgressMap: Map<String, Float> = emptyMap(),
 ) {
     var subView by remember { mutableStateOf(LibrarySubView.Overview) }
-    var showClearHistoryDialog by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(value = false) }
 
     // Intercept back navigation when in sub-views
     BackHandler(enabled = subView != LibrarySubView.Overview) {
@@ -311,7 +311,7 @@ private fun LibraryOverviewView(
                 LibraryEmptySectionPlaceholder(
                     icon = Icons.Outlined.FileDownloadOff,
                     title = stringResource(R.string.library_downloads_empty_title),
-                    subtitle = stringResource(R.string.library_downloads_empty_desc)
+                    subtitle = stringResource(R.string.library_downloads_empty_desc),
                 )
             }
         } else {
@@ -319,9 +319,9 @@ private fun LibraryOverviewView(
                 items = top5Downloads,
                 key = { "downloaded_${it.id}" }
             ) { video ->
-                val isVideoPlaying = video.id == currentPlayingVideoId && isPlaying
-                val isVideoBuffering = video.id == currentPlayingVideoId && isAudioBuffering
-                val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                val isVideoPlaying = (video.id == currentPlayingVideoId) && isPlaying
+                val isVideoBuffering = (video.id == currentPlayingVideoId) && isAudioBuffering
+                val isQueued = (video.id in queuedDownloadIds) || video.isDownloadQueued
                 val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                 VideoItem(
                     video = video,
@@ -443,9 +443,9 @@ private fun FullListView(
                     items = videos,
                     key = { it.id }
                 ) { video ->
-                    val isVideoPlaying = video.id == currentPlayingVideoId && isPlaying
-                    val isVideoBuffering = video.id == currentPlayingVideoId && isAudioBuffering
-                    val isQueued = video.id in queuedDownloadIds || video.isDownloadQueued
+                    val isVideoPlaying = (video.id == currentPlayingVideoId) && isPlaying
+                    val isVideoBuffering = (video.id == currentPlayingVideoId) && isAudioBuffering
+                    val isQueued = (video.id in queuedDownloadIds) || video.isDownloadQueued
                     val activeProgress = downloadingProgressMap[video.id] ?: video.downloadProgress
                     VideoItem(
                         video = video,
@@ -455,7 +455,7 @@ private fun FullListView(
                         downloadProgress = activeProgress,
                         onPlayClick = { onPlayVideo(video) },
                         onDownloadClick = { onDownloadVideo(video) },
-                        modifier = Modifier.padding(horizontal = 16.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp),
                     )
                 }
             }
@@ -483,9 +483,9 @@ private fun LibrarySectionHeader(
             color = MaterialTheme.colorScheme.onSurface
         )
 
-        if (onSeeAllClick != null) {
+        onSeeAllClick?.let { onClick ->
             TextButton(
-                onClick = onSeeAllClick,
+                onClick = onClick,
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
             ) {
                 Text(

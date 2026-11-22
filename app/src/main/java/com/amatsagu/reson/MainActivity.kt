@@ -31,7 +31,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -50,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,7 +76,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
     private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestPermission(),
     ) { /* Permission result handled */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -403,9 +401,9 @@ fun FeedScreen(
                             key = { it.id },
                             contentType = { "feed_video" }
                         ) { video ->
-                            val isPlaying = video.id == uiState.currentPlayingVideo?.id && uiState.isPlaying
-                            val isBuffering = video.id == uiState.currentPlayingVideo?.id && uiState.isAudioBuffering
-                            val isQueued = video.id in uiState.queuedDownloadIds || video.isDownloadQueued
+                            val isPlaying = (video.id == uiState.currentPlayingVideo?.id) && uiState.isPlaying
+                            val isBuffering = (video.id == uiState.currentPlayingVideo?.id) && uiState.isAudioBuffering
+                            val isQueued = (video.id in uiState.queuedDownloadIds) || video.isDownloadQueued
                             val activeProgress = uiState.downloadingProgressMap[video.id] ?: video.downloadProgress
                             VideoItem(
                                 video = video,

@@ -103,10 +103,10 @@ fun SettingsScreen(
     val scrollState = rememberScrollState()
 
     // Dialog states
-    var showSelfRepairDialog by remember { mutableStateOf(false) }
-    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showSelfRepairDialog by remember { mutableStateOf(value = false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(value = false) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
-    var showImportConfirmDialog by remember { mutableStateOf(false) }
+    var showImportConfirmDialog by remember { mutableStateOf(value = false) }
 
     val exportSuccessMsg = stringResource(R.string.settings_export_success)
     val exportFailedTemplate = stringResource(R.string.settings_export_failed)
@@ -117,12 +117,11 @@ fun SettingsScreen(
 
     // Export file picker launcher
     val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
         if (uri != null) {
             try {
-                val outputStream = context.contentResolver.openOutputStream(uri)
-                if (outputStream != null) {
+                context.contentResolver.openOutputStream(uri)?.let { outputStream ->
                     onExportDatabase(outputStream) { success, error ->
                         val msg = if (success) {
                             exportSuccessMsg
@@ -553,7 +552,7 @@ fun SettingsScreen(
     }
 
     // 2. Import Database Dialog
-    if (showImportConfirmDialog && pendingImportUri != null) {
+    if (showImportConfirmDialog && (pendingImportUri != null)) {
         val uri = pendingImportUri!!
         AlertDialog(
             onDismissRequest = {

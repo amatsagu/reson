@@ -88,14 +88,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Checks if a channel is currently followed.
-     */
-    suspend fun isChannelFollowed(channelId: String): Boolean = withContext(dispatcher) {
-        val db = dbHelper.readableDatabase
-        channelDao.isChannelFollowed(db, channelId)
-    }
-
-    /**
      * Returns a snapshot of all currently followed channels sorted by follow time.
      */
     suspend fun getFollowedChannels(): List<Channel> = withContext(dispatcher) {
@@ -208,26 +200,10 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Fetches a video by its unique YouTube ID.
-     */
-    suspend fun getVideoById(videoId: String): Video? = withContext(dispatcher) {
-        val db = dbHelper.readableDatabase
-        videoDao.getVideoById(db, videoId)
-    }
-
-    /**
      * Gets recent videos from all followed channels with pagination support.
      * Uses balanced distribution across followed channels (up to 5 recent uploads per channel)
      * to prevent high-frequency uploaders from starving the feed.
      */
-    /**
-     * Gets unwatched videos from followed channels.
-     */
-    suspend fun getUnwatchedFollowedVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
-        val db = dbHelper.readableDatabase
-        videoDao.getUnwatchedFollowedVideos(db, limit, offset)
-    }
-
     /**
      * Gets unwatched recommended discovery videos from non-followed channels.
      */
@@ -246,7 +222,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     suspend fun getFeedVideos(
         limit: Int = 30,
         offset: Int = 0,
-        excludeIds: Set<String> = emptySet()
+        excludeIds: Set<String> = emptySet(),
     ): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
 
@@ -296,32 +272,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val db = dbHelper.readableDatabase
         videoDao.getVideosForChannel(db, channelId, limit, offset)
     }
-
-    /**
-     * Reactive Flow of videos for a specific channel.
-     */
-    fun observeVideosForChannel(channelId: String, limit: Int = 30): Flow<List<Video>> = flow {
-        videoInvalidationTrigger.collect {
-            emit(getVideosForChannel(channelId, limit, offset = 0))
-        }
-    }.flowOn(dispatcher)
-
-    /**
-     * Gets recent uploads from followed channels, limited to maxPerChannel with pagination support.
-     */
-    suspend fun getRecentVideosFromFollowed(maxPerChannel: Int = 5, limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
-        val db = dbHelper.readableDatabase
-        videoDao.getRecentVideosFromFollowedChannels(db, maxPerChannel, limit, offset)
-    }
-
-    /**
-     * Reactive Flow observing recent uploads from followed channels (maxPerChannel).
-     */
-    fun observeRecentVideosFromFollowed(maxPerChannel: Int = 5, limit: Int = 30): Flow<List<Video>> = flow {
-        videoInvalidationTrigger.collect {
-            emit(getRecentVideosFromFollowed(maxPerChannel, limit, offset = 0))
-        }
-    }.flowOn(dispatcher)
 
     /**
      * Gets all videos from followed channels released within the last 1 month (cutoff: 30 days ago),
@@ -374,15 +324,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Marks a video as completed (progress = 1.0f) so it exits the continue listening list.
-     */
-    suspend fun markVideoCompleted(videoId: String): Boolean = withContext(dispatcher) {
-        val video = getVideoById(videoId) ?: return@withContext false
-        val durationMs = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
-        savePlaybackProgress(videoId, durationMs, durationMs, notify = true)
-    }
-
-    /**
      * Fetches in-progress videos (< 98% complete) for the Continue section with pagination support.
      */
     suspend fun getContinueListeningVideos(limit: Int = 10, offset: Int = 0): List<Video> = withContext(dispatcher) {
@@ -412,7 +353,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val path = dbVideo?.downloadFilePath
         if (!path.isNullOrBlank()) {
             val file = File(path)
-            if (file.exists() && file.length() > 0) {
+            if (file.exists() && (file.length() > 0)) {
                 return file
             }
         }
@@ -425,8 +366,8 @@ class DatabaseManager private constructor(private val appContext: Context) {
             if (file != null) return file
         }
 
-        val fallback = File(appContext.filesDir, "offline_${videoId}.mp3")
-        if (fallback.exists() && fallback.length() > 0) {
+        val fallback = File(appContext.filesDir, "offline_$videoId.mp3")
+        if (fallback.exists() && (fallback.length() > 0)) {
             return fallback
         }
 
@@ -633,7 +574,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
         val dbDir = dbFile.parentFile
         val dbFilesSize = if (dbDir != null && dbDir.exists()) {
-            dbDir.listFiles()?.filter { it.name.startsWith(ResonDatabaseHelper.DATABASE_NAME) }?.sumOf { it.length() }
+            dbDir.listFiles()?.asSequence()?.filter { it.name.startsWith(ResonDatabaseHelper.DATABASE_NAME) }?.sumOf { it.length() }
                 ?: (if (dbFile.exists()) dbFile.length() else 0L)
         } else {
             if (dbFile.exists()) dbFile.length() else 0L
@@ -698,12 +639,10 @@ class DatabaseManager private constructor(private val appContext: Context) {
         notifyVideoChanged()
     }
 
-    fun getDatabaseSchemaVersion(): Int = ResonDatabaseHelper.DATABASE_VERSION
-
     /**
      * Flushes WAL and exports the SQLite database file to the provided output stream.
      */
-    suspend fun exportDatabase(outputStream: OutputStream): kotlin.Result<Unit> = withContext(dispatcher) {
+    suspend fun exportDatabase(outputStream: OutputStream): Result<Unit> = withContext(dispatcher) {
         mutex.withLock {
             try {
                 val db = dbHelper.writableDatabase
@@ -711,17 +650,17 @@ class DatabaseManager private constructor(private val appContext: Context) {
 
                 val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
                 if (!dbFile.exists()) {
-                    return@withContext kotlin.Result.failure(IllegalStateException("Database file not found"))
+                    return@withContext Result.failure(IllegalStateException("Database file not found"))
                 }
 
                 FileInputStream(dbFile).use { input ->
                     input.copyTo(outputStream)
                 }
                 outputStream.flush()
-                kotlin.Result.success(Unit)
+                Result.success(Unit)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to export database", e)
-                kotlin.Result.failure(e)
+                Result.failure(e)
             }
         }
     }
