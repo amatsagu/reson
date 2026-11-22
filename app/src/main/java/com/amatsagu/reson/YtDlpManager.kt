@@ -233,13 +233,14 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
             if (json.optBoolean("requires_payment", false) ||
                 json.optBoolean("paywalled", false) ||
-                json.optBoolean("is_unplayable", false)
+                json.optBoolean("is_unplayable", false) ||
+                json.optBoolean("is_live", false)
             ) {
                 return true
             }
 
             val liveStatus = json.optCleanString("live_status").lowercase()
-            if (liveStatus == "is_upcoming") {
+            if (liveStatus == "is_upcoming" || liveStatus == "is_live" || liveStatus == "live") {
                 return true
             }
 
@@ -263,10 +264,17 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         /**
-         * Checks a video title for explicit supporters/members-only badges or bracketed tags.
+         * Checks a video title for explicit supporters/members-only badges, bracketed tags, or private/deleted status.
          */
         fun isLockedVideoTitle(title: String): Boolean {
-            if (title.isBlank()) return false
+            if (title.isBlank()) return true
+            if (title.equals("[Private video]", ignoreCase = true) ||
+                title.equals("[Deleted video]", ignoreCase = true) ||
+                title.contains("private video", ignoreCase = true) ||
+                title.contains("deleted video", ignoreCase = true)
+            ) {
+                return true
+            }
             val regexBracket = "(?i)[\\[(](?:members?|supporters?|subscribers?)[-\\s]only[])]".toRegex()
             if (regexBracket.containsMatchIn(title)) return true
 
@@ -321,12 +329,13 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         /**
-         * Checks if a domain Video object is a YouTube Short.
+         * Checks if a domain Video object is a YouTube Short, locked, private, or livestream.
          */
         fun isShortVideo(video: Video): Boolean {
             return isShortVideoTitle(video.title) ||
                     video.webpageUrl.contains("/shorts/") ||
-                    (video.durationSeconds in 1..60)
+                    (video.durationSeconds in 1..60) ||
+                    isLockedVideoTitle(video.title)
         }
 
         /**
