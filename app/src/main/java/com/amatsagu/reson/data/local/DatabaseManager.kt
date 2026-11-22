@@ -532,7 +532,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Purges all YouTube Shorts from SQLite storage.
+     * Purges all YouTube Shorts and unplayed zero-duration videos from SQLite storage.
      */
     suspend fun deleteShortVideos(): Int = withContext(dispatcher) {
         val deleted = mutex.withLock {
@@ -541,6 +541,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
         if (deleted > 0) {
             notifyVideoChanged()
+            Log.d(TAG, "Purged $deleted shorts / zero-duration videos from SQLite database")
         }
         deleted
     }
@@ -762,6 +763,19 @@ class DatabaseManager private constructor(private val appContext: Context) {
                 dbHelper = ResonDatabaseHelper(appContext)
                 val newDb = dbHelper.writableDatabase
                 newDb.rawQuery("SELECT 1", null).use { it.moveToFirst() }
+
+                try {
+                    newDb.execSQL("""
+                        DELETE FROM videos 
+                        WHERE (duration_seconds BETWEEN 1 AND 60)
+                           OR (duration_seconds = 0 AND last_played_at = 0 AND is_downloaded = 0)
+                           OR webpage_url LIKE '%/shorts/%'
+                           OR title LIKE '%#shorts%'
+                           OR title LIKE '%#short%'
+                    """.trimIndent())
+                } catch (pe: Exception) {
+                    Log.e(TAG, "Error purging shorts during import: ${pe.message}", pe)
+                }
 
                 notifyChannelChanged()
                 notifyVideoChanged()

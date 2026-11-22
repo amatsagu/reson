@@ -5,6 +5,9 @@ import com.amatsagu.reson.Result
 import com.amatsagu.reson.YtDlpManager
 import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import com.amatsagu.reson.model.Video
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import java.net.HttpURLConnection
@@ -86,16 +89,48 @@ object YouTubeRssFetcher {
                 )
             }
 
-            val videos = connection.inputStream.use { stream ->
+            val rawVideos = connection.inputStream.use { stream ->
                 parseAtomFeed(stream, cleanId, fallbackChannelTitle)
             }
-            Log.d(TAG, "RSS fetch for $cleanId succeeded. Found ${videos.size} uploads.")
+            val videos = coroutineScope {
+                rawVideos.map { video ->
+                    async {
+                        if (isShortVideoId(video.id)) {
+                            Log.d(TAG, "Filtering out short via HEAD check: ${video.id} (${video.title})")
+                            null
+                        } else {
+                            video
+                        }
+                    }
+                }.awaitAll().filterNotNull()
+            }
+            Log.d(TAG, "RSS fetch for $cleanId succeeded. Found ${videos.size} uploads (${rawVideos.size - videos.size} shorts excluded).")
             Result.Success(videos)
         } catch (e: Throwable) {
             Log.d(TAG, "RSS fetch error for $cleanId: ${e.message}")
             Result.Failure(e, e.message ?: "Failed to fetch RSS feed")
         } finally {
             connection?.disconnect()
+        }
+    }
+
+    suspend fun isShortVideoId(videoId: String): Boolean = withContext(ResonDispatchers.Network) {
+        if (videoId.isBlank()) return@withContext false
+        var conn: HttpURLConnection? = null
+        try {
+            val url = URL("https://www.youtube.com/shorts/$videoId")
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "HEAD"
+                instanceFollowRedirects = false
+                connectTimeout = 3000
+                readTimeout = 3000
+                setRequestProperty("User-Agent", USER_AGENT)
+            }
+            conn.responseCode == HttpURLConnection.HTTP_OK
+        } catch (_: Throwable) {
+            false
+        } finally {
+            conn?.disconnect()
         }
     }
 

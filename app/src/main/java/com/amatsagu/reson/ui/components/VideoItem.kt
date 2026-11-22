@@ -104,8 +104,15 @@ fun VideoItem(
                 lineHeight = 20.sp
             )
 
-            val channelAndDuration = if (video.durationText.isNotBlank()) {
-                "${video.channelTitle} · ${video.durationText}"
+            val duration = when {
+                (video.durationText.isNotBlank() && video.durationText != "Unknown") -> video.durationText
+                video.durationSeconds > 0 -> com.amatsagu.reson.YtDlpManager.formatDuration(video.durationSeconds)
+                video.playbackDurationMs > 0L -> com.amatsagu.reson.YtDlpManager.formatDuration((video.playbackDurationMs / 1000L).toInt())
+                else -> ""
+            }
+
+            val channelAndDuration = if (duration.isNotBlank()) {
+                "${video.channelTitle} · $duration"
             } else {
                 video.channelTitle
             }

@@ -194,6 +194,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     msg.contains("captcha")
         }
 
+        fun formatDuration(seconds: Int): String {
+            if (seconds <= 0) return ""
+            val hours = seconds / 3600
+            val minutes = (seconds % 3600) / 60
+            val secs = seconds % 60
+            return when {
+                hours > 0 -> "${hours}h ${minutes}m"
+                minutes > 0 -> "${minutes}m"
+                else -> "${secs}s"
+            }
+        }
+
         /**
          * Checks if an extraction failure was caused by supporter/member restrictions, paywalls,
          * or private authentication gates that cannot be bypassed without user login.
@@ -730,6 +742,16 @@ class YtDlpManager private constructor(private val appContext: Context) {
      * Initializes yt-dlp and FFmpeg. If initialization fails (e.g., file corruption from an interrupted
      * write/update), it performs an automatic self-recovery by wiping the corrupted binaries and re-extracting.
      */
+    private fun resetYoutubeDLInitialization() {
+        try {
+            val field = YoutubeDL::class.java.getDeclaredField("initialized")
+            field.isAccessible = true
+            field.set(YoutubeDL.getInstance(), false)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to reset initialized field: ${e.message}")
+        }
+    }
+
     suspend fun initialize(): Boolean = withContext(networkDispatcher) {
         mutex.withLock {
             if (_state.value is YtDlpState.Ready) {
@@ -740,6 +762,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
             Log.i(TAG, "Initializing yt-dlp...")
 
             try {
+                val libSupport = File(appContext.noBackupFilesDir, "youtubedl-android/packages/python/usr/lib/libandroid-support.so")
+                val ytdlpBinary = File(appContext.noBackupFilesDir, "youtubedl-android/ytdlp/yt-dlp")
+                if (!libSupport.exists() || !ytdlpBinary.exists() || libSupport.length() == 0L || ytdlpBinary.length() == 0L) {
+                    Log.w(TAG, "Critical runtime dependencies missing from noBackupFilesDir. Wiping and forcing re-extraction...")
+                    File(appContext.noBackupFilesDir, "youtubedl-android").deleteRecursively()
+                    appContext.getSharedPreferences("youtubedl-android", Context.MODE_PRIVATE).edit().clear().commit()
+                    resetYoutubeDLInitialization()
+                }
+
                 YoutubeDL.getInstance().init(appContext)
 
                 try {
@@ -770,7 +801,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
     ): Boolean = withContext(networkDispatcher) {
         executeQueued(priority, "SelfRecovery") {
             try {
-                Log.w(TAG, "Starting self-recovery: cleaning up binaries in filesDir...")
+                Log.w(TAG, "Starting self-recovery: cleaning up binaries in filesDir and noBackupFilesDir...")
                 _state.value = YtDlpState.Initializing
 
                 val filesDir = appContext.filesDir
@@ -778,7 +809,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     File(filesDir, "youtubedl"),
                     File(filesDir, "no-pie"),
                     File(filesDir, "bin"),
-                    File(appContext.cacheDir, "youtubedl")
+                    File(appContext.cacheDir, "youtubedl"),
+                    File(appContext.noBackupFilesDir, "youtubedl-android")
                 )
 
                 for (target in targets) {
@@ -787,6 +819,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         Log.d(TAG, "Deleted: ${target.absolutePath}")
                     }
                 }
+                appContext.getSharedPreferences("youtubedl-android", Context.MODE_PRIVATE).edit().clear().commit()
+                resetYoutubeDLInitialization()
 
                 YoutubeDL.getInstance().init(appContext)
                 try {
@@ -1392,6 +1426,18 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 Result.Success(videos)
             } catch (e: Throwable) {
                 Log.e(TAG, "Search failed for '$trimmed': ${e.message}", e)
+                val isLinkerError = (e.message ?: "").contains("libandroid-support.so") || (e.message ?: "").contains("CANNOT LINK EXECUTABLE")
+                if (isLinkerError) {
+                    Log.w(TAG, "Linker error detected during search. Forcing clean re-extraction...")
+                    try {
+                        File(appContext.noBackupFilesDir, "youtubedl-android").deleteRecursively()
+                        appContext.getSharedPreferences("youtubedl-android", Context.MODE_PRIVATE).edit().clear().commit()
+                        resetYoutubeDLInitialization()
+                        YoutubeDL.getInstance().init(appContext)
+                    } catch (re: Throwable) {
+                        Log.e(TAG, "Recovery from linker failure error: ${re.message}", re)
+                    }
+                }
                 Result.Failure(e, e.message ?: "Failed to perform search")
             }
         }
@@ -1733,18 +1779,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     } else primaryResult
                 } else primaryResult
             }
-        }
-    }
-
-    private fun formatDuration(seconds: Int): String {
-        if (seconds <= 0) return "Unknown"
-        val hours = seconds / 3600
-        val minutes = (seconds % 3600) / 60
-        val secs = seconds % 60
-        return when {
-            hours > 0 -> "${hours}h ${minutes}m"
-            minutes > 0 -> "${minutes}m"
-            else -> "${secs}s"
         }
     }
 

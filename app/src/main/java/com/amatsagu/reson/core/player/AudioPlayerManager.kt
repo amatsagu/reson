@@ -322,6 +322,11 @@ class AudioPlayerManager(
     }
 
     init {
+        try {
+            activeMediaSession?.release()
+        } catch (_: Exception) {}
+        activeMediaSession = null
+
         val sessionActivityIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }

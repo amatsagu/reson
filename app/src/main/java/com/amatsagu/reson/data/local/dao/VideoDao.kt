@@ -27,6 +27,21 @@ class VideoDao {
                     values.put("playback_progress", existing.playbackProgress)
                     values.put("last_played_at", existing.lastPlayedAt)
                 }
+                if (video.durationText.isBlank() && existing.durationText.isNotBlank()) {
+                    values.put("duration_text", existing.durationText)
+                }
+                if (video.durationSeconds <= 0 && existing.durationSeconds > 0) {
+                    values.put("duration_seconds", existing.durationSeconds)
+                }
+                if (video.playbackDurationMs <= 0L && existing.playbackDurationMs > 0L) {
+                    values.put("playback_duration_ms", existing.playbackDurationMs)
+                }
+                if (video.releaseDateText.isBlank() && existing.releaseDateText.isNotBlank()) {
+                    values.put("release_date_text", existing.releaseDateText)
+                }
+                if (video.releaseTimestamp <= 0L && existing.releaseTimestamp > 0L) {
+                    values.put("release_timestamp", existing.releaseTimestamp)
+                }
                 if (!video.isDownloaded && existing.isDownloaded) {
                     values.put("is_downloaded", 1)
                     if (existing.downloadFilePath != null) {
@@ -62,7 +77,7 @@ class VideoDao {
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
             WHERE c.is_followed = 1
-              AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+              AND v.duration_seconds > 60
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
@@ -84,7 +99,7 @@ class VideoDao {
             WHERE c.is_followed = 1
               AND v.last_played_at = 0
               AND v.playback_progress = 0
-              AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+              AND v.duration_seconds > 60
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
@@ -107,7 +122,7 @@ class VideoDao {
             WHERE (c.is_followed IS NULL OR c.is_followed = 0)
               AND v.last_played_at = 0
               AND v.playback_progress = 0
-              AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+              AND v.duration_seconds > 60
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ORDER BY 
               CASE 
@@ -135,7 +150,7 @@ class VideoDao {
     }
 
     fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 30, offset: Int = 0): List<Video> {
-        val query = "SELECT * FROM videos WHERE channel_id = ? AND (duration_seconds = 0 OR duration_seconds > 60) AND title NOT LIKE '%#shorts%' AND title NOT LIKE '%#short%' AND webpage_url NOT LIKE '%/shorts/%' ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
+        val query = "SELECT * FROM videos WHERE channel_id = ? AND duration_seconds > 60 AND title NOT LIKE '%#shorts%' AND title NOT LIKE '%#short%' AND webpage_url NOT LIKE '%/shorts/%' ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
         return queryVideos(db, query, arrayOf(channelId, limit.toString(), offset.toString()))
     }
 
@@ -157,7 +172,7 @@ class VideoDao {
                 FROM videos v
                 INNER JOIN channels c ON v.channel_id = c.id
                 WHERE c.is_followed = 1
-                  AND (v.duration_seconds = 0 OR v.duration_seconds > 60)
+                  AND v.duration_seconds > 60
                   AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ) v
             WHERE v.rn <= ?
@@ -183,6 +198,8 @@ class VideoDao {
             INNER JOIN channels c ON v.channel_id = c.id
             WHERE c.is_followed = 1
               AND ((v.release_timestamp > 0 AND v.release_timestamp >= ?) OR (v.release_timestamp <= 0 AND v.created_at >= ?))
+              AND v.duration_seconds > 60
+              AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
@@ -323,7 +340,7 @@ class VideoDao {
      * Purges all YouTube Shorts from SQLite storage.
      */
     fun deleteShortVideos(db: SQLiteDatabase): Int {
-        val where = "(duration_seconds > 0 AND duration_seconds <= 60) OR title LIKE '%#shorts%' OR title LIKE '%#short%' OR webpage_url LIKE '%/shorts/%'"
+        val where = "(duration_seconds > 0 AND duration_seconds <= 60) OR (duration_seconds = 0 AND last_played_at = 0 AND is_downloaded = 0) OR title LIKE '%#shorts%' OR title LIKE '%#short%' OR webpage_url LIKE '%/shorts/%'"
         return db.delete("videos", where, null)
     }
 

@@ -15,6 +15,7 @@ class FeedMixerTest {
             channelTitle = channelId,
             title = title,
             durationText = "10m",
+            durationSeconds = 600,
             releaseTimestamp = 1700000000L,
         )
     }
