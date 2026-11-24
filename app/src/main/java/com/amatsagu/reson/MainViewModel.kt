@@ -283,6 +283,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             databaseManager.observeFollowedChannels().collect { channels ->
                 _uiState.update { it.copy(followedChannelList = channels) }
+                ensureFollowedChannelAvatars(channels)
             }
         }
 
@@ -564,10 +565,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val sim = YtDlpManager.calculateSimilarity(trimmed, v.channelTitle, "")
                             if (sim >= 0.60) {
                                 existingChannelIds.add(v.channelId)
+                                val matched = rawChannels.find { it.title.equals(v.channelTitle, ignoreCase = true) }
                                 rawChannels.add(
                                     Channel(
                                         id = v.channelId,
-                                        title = v.channelTitle
+                                        title = v.channelTitle,
+                                        handle = matched?.handle.orEmpty(),
+                                        avatarUrl = matched?.avatarUrl.orEmpty(),
+                                        subscriberCount = matched?.subscriberCount ?: 0L,
+                                        subscriberCountText = matched?.subscriberCountText.orEmpty()
                                     )
                                 )
                             }
@@ -658,7 +664,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 handle = ch?.handle.orEmpty(),
                                 channelTitle = ch?.title.orEmpty(),
                                 startIndex = 1,
-                                maxResults = PAGE_SIZE
+                                maxResults = PAGE_SIZE,
+                                onAvatarExtracted = { avatarUrl ->
+                                    if (ch?.avatarBase64.isNullOrBlank()) {
+                                        viewModelScope.launch {
+                                            val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
+                                            if (!base64.isNullOrBlank()) {
+                                                databaseManager.updateChannelAvatarUrlAndBase64(channelId, avatarUrl, base64)
+                                            }
+                                        }
+                                    }
+                                }
                             )
                         }
                         if ((result is Result.Success) && result.data.isNotEmpty()) {
@@ -920,26 +936,89 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var avatarSyncJob: Job? = null
+
+    /**
+     * Proactively verifies followed channels have offline Base64 avatars cached.
+     * Reuses known avatarUrl first, falling back to lightweight web scraping (og:image)
+     * and finally dedicated yt-dlp metadata extraction.
+     */
+    private fun ensureFollowedChannelAvatars(channels: List<Channel>) {
+        val missing = channels.filter { it.avatarBase64.isBlank() }
+        if (missing.isEmpty() || avatarSyncJob?.isActive == true) return
+
+        avatarSyncJob = viewModelScope.launch(ResonDispatchers.Network) {
+            for (ch in missing) {
+                if (!isActive) break
+
+                // 1. If avatarUrl already exists, download directly (zero extra discovery calls)
+                if (ch.avatarUrl.isNotBlank()) {
+                    val base64 = AvatarManager.downloadAvatarAsBase64(ch.avatarUrl)
+                    if (!base64.isNullOrBlank()) {
+                        databaseManager.updateChannelAvatarBase64(ch.id, base64)
+                        continue
+                    }
+                }
+
+                // 2. Fallback: lightweight web request (og:image)
+                val webAvatarUrl = AvatarManager.fetchChannelAvatarUrl(ch.id, ch.handle)
+                if (!webAvatarUrl.isNullOrBlank()) {
+                    val base64 = AvatarManager.downloadAvatarAsBase64(webAvatarUrl)
+                    if (!base64.isNullOrBlank()) {
+                        databaseManager.updateChannelAvatarUrlAndBase64(ch.id, webAvatarUrl, base64)
+                        continue
+                    }
+                }
+
+                // 3. Fallback: dedicated yt-dlp extraction
+                val ytdlAvatarUrl = ytDlpManager.fetchChannelAvatarOnly(ch.id, ch.handle)
+                if (!ytdlAvatarUrl.isNullOrBlank()) {
+                    val base64 = AvatarManager.downloadAvatarAsBase64(ytdlAvatarUrl)
+                    if (!base64.isNullOrBlank()) {
+                        databaseManager.updateChannelAvatarUrlAndBase64(ch.id, ytdlAvatarUrl, base64)
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * Background task to download channel avatar as compact Base64 and fetch recent uploads.
+     * Reuses feed metadata to capture avatar without redundant requests, falling back to web/yt-dlp only if needed.
      */
     private fun syncChannelInBackground(channel: Channel) {
         viewModelScope.launch {
-            // 1. Download avatar as Base64 if not already cached
-            if (channel.avatarBase64.isBlank() && channel.avatarUrl.isNotBlank()) {
+            var hasAvatar = channel.avatarBase64.isNotBlank()
+
+            // 1. Download avatar as Base64 if not already cached and avatarUrl is known
+            if (!hasAvatar && channel.avatarUrl.isNotBlank()) {
                 val base64 = AvatarManager.downloadAvatarAsBase64(channel.avatarUrl)
                 if (!base64.isNullOrBlank()) {
                     databaseManager.updateChannelAvatarBase64(channel.id, base64)
+                    hasAvatar = true
                     addLog("Cached offline avatar for ${channel.title}")
                 }
             }
 
             // 2. Fetch latest videos for this channel via yt-dlp (up to 20 to capture recent uploads)
+            // Reuses channel feed metadata to capture avatar if still missing (zero extra network calls)
             val result = ytDlpManager.fetchChannelVideos(
                 channelId = channel.id,
                 handle = channel.handle,
                 channelTitle = channel.title,
-                maxResults = 20
+                maxResults = 20,
+                onAvatarExtracted = { avatarUrl ->
+                    if (!hasAvatar) {
+                        viewModelScope.launch {
+                            val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
+                            if (!base64.isNullOrBlank()) {
+                                databaseManager.updateChannelAvatarUrlAndBase64(channel.id, avatarUrl, base64)
+                                hasAvatar = true
+                                addLog("Cached offline avatar from feed for ${channel.title}")
+                            }
+                        }
+                    }
+                }
             )
             when (result) {
                 is Result.Success -> {
@@ -950,6 +1029,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is Result.Failure -> {
                     addLog("Could not fetch uploads for ${channel.title}: ${result.message}")
+                }
+            }
+
+            // 3. Fallback: Only if avatar is STILL missing after video fetch, do extra web request / ytdl request
+            if (!hasAvatar) {
+                val webUrl = AvatarManager.fetchChannelAvatarUrl(channel.id, channel.handle)
+                if (!webUrl.isNullOrBlank()) {
+                    val base64 = AvatarManager.downloadAvatarAsBase64(webUrl)
+                    if (!base64.isNullOrBlank()) {
+                        databaseManager.updateChannelAvatarUrlAndBase64(channel.id, webUrl, base64)
+                        hasAvatar = true
+                        addLog("Cached avatar via web fallback for ${channel.title}")
+                    }
+                }
+                if (!hasAvatar) {
+                    val ytdlUrl = ytDlpManager.fetchChannelAvatarOnly(channel.id, channel.handle)
+                    if (!ytdlUrl.isNullOrBlank()) {
+                        val base64 = AvatarManager.downloadAvatarAsBase64(ytdlUrl)
+                        if (!base64.isNullOrBlank()) {
+                            databaseManager.updateChannelAvatarUrlAndBase64(channel.id, ytdlUrl, base64)
+                            addLog("Cached avatar via yt-dlp fallback for ${channel.title}")
+                        }
+                    }
                 }
             }
         }
@@ -993,31 +1095,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 for (ch in channelsToSync) {
                     if (!isActive) break
 
-                    // Ensure avatar is cached
-                    if (ch.avatarBase64.isBlank()) {
-                        val avatarUrl = ch.avatarUrl.ifBlank {
-                            AvatarManager.fetchChannelAvatarUrl(ch.id)
-                        }
-                        if (!avatarUrl.isNullOrBlank()) {
-                            val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
-                            if (!base64.isNullOrBlank()) {
-                                databaseManager.updateChannelAvatarUrlAndBase64(ch.id, avatarUrl, base64)
-                            }
-                        }
-                    }
-
-                    // Directly query YouTube's dedicated long-form /videos tab via yt-dlp to guarantee duration and exclude shorts
+                    // Directly query YouTube's dedicated long-form /videos tab via yt-dlp to guarantee duration and exclude shorts.
+                    // Reuses feed metadata to capture channel avatar if not already cached.
                     val ytResult = ytDlpManager.fetchChannelVideos(
                         channelId = ch.id,
                         handle = ch.handle,
                         channelTitle = ch.title,
                         maxResults = 20,
-                        priority = TaskPriority.BACKGROUND
+                        priority = TaskPriority.BACKGROUND,
+                        onAvatarExtracted = { avatarUrl ->
+                            if (ch.avatarBase64.isBlank()) {
+                                viewModelScope.launch {
+                                    val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
+                                    if (!base64.isNullOrBlank()) {
+                                        databaseManager.updateChannelAvatarUrlAndBase64(ch.id, avatarUrl, base64)
+                                    }
+                                }
+                            }
+                        }
                     )
                     if (ytResult is Result.Success && ytResult.data.isNotEmpty()) {
                         databaseManager.upsertVideos(ytResult.data, defaultChannelId = ch.id)
                     }
                     databaseManager.updateChannelLastSyncTime(ch.id, System.currentTimeMillis())
+
+                    // Fallback only if avatar is still missing after video fetch
+                    if (ch.avatarBase64.isBlank()) {
+                        val currentCh = databaseManager.getFollowedChannels().find { it.id == ch.id }
+                        if (currentCh == null || currentCh.avatarBase64.isBlank()) {
+                            val avatarUrl = ch.avatarUrl.ifBlank {
+                                AvatarManager.fetchChannelAvatarUrl(ch.id, ch.handle)
+                            } ?: ytDlpManager.fetchChannelAvatarOnly(ch.id, ch.handle)
+                            if (!avatarUrl.isNullOrBlank()) {
+                                val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
+                                if (!base64.isNullOrBlank()) {
+                                    databaseManager.updateChannelAvatarUrlAndBase64(ch.id, avatarUrl, base64)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1175,7 +1291,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         channelTitle = ch?.title.orEmpty(),
                         startIndex = 1,
                         maxResults = PAGE_SIZE,
-                        priority = TaskPriority.INTERACTIVE
+                        priority = TaskPriority.INTERACTIVE,
+                        onAvatarExtracted = { avatarUrl ->
+                            if (ch?.avatarBase64.isNullOrBlank()) {
+                                viewModelScope.launch {
+                                    val base64 = AvatarManager.downloadAvatarAsBase64(avatarUrl)
+                                    if (!base64.isNullOrBlank()) {
+                                        databaseManager.updateChannelAvatarUrlAndBase64(selectedId, avatarUrl, base64)
+                                    }
+                                }
+                            }
+                        }
                     )
                 }
 

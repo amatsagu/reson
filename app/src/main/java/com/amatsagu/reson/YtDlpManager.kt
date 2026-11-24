@@ -13,6 +13,7 @@ import com.amatsagu.reson.core.coroutines.ResonDispatchers
 import com.amatsagu.reson.model.Channel
 import com.amatsagu.reson.model.SearchResultItem
 import com.amatsagu.reson.model.Video
+import com.amatsagu.reson.data.local.AvatarManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -1297,96 +1298,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     if (jsonLine.isEmpty() || !jsonLine.startsWith("{")) continue
                     try {
                         val json = org.json.JSONObject(jsonLine)
-                        // Silently drop locked/supporters-only/members-only/paywalled videos and shorts
-                        if (isLockedVideo(json) || isShortVideo(json)) {
-                            Log.d(TAG, "Silently dropping locked/short video: ${json.optCleanString("id")}")
-                            continue
+                        val video = parseVideo(json, isDirectUrl = isDirectUrl, directUrl = trimmed)
+                        if (video != null) {
+                            videos.add(video)
                         }
-
-                        val id = json.optCleanString("id")
-                        if (id.isEmpty()) continue
-
-                        val title = json.optCleanString("title", "Untitled")
-                        val uploader = json.optCleanString("uploader").ifEmpty {
-                            json.optCleanString("channel").ifEmpty {
-                                json.optCleanString("uploader_id").ifEmpty {
-                                    json.optCleanString("creator").ifEmpty {
-                                        json.optCleanString("channel_id").ifEmpty {
-                                            "Unknown Channel"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        val duration = json.optInt("duration", 0)
-                        val rawTimestamp = json.optLong("timestamp", 0L)
-                        val rawDate = json.optCleanString("upload_date")
-                        val timestamp = if (rawTimestamp > 0L) {
-                            rawTimestamp
-                        } else if (rawDate.length == 8 && rawDate.all { it.isDigit() }) {
-                            try {
-                                val sdf = java.text.SimpleDateFormat("yyyyMMdd", Locale.US).apply {
-                                    timeZone = java.util.TimeZone.getTimeZone("UTC")
-                                }
-                                sdf.parse(rawDate)?.time?.div(1000L) ?: 0L
-                            } catch (_: Exception) {
-                                0L
-                            }
-                        } else {
-                            0L
-                        }
-                        val releaseDateText = formatRelativeDate(timestamp, rawDate)
-
-                        var thumb = ""
-                        val thumbs = json.optJSONArray("thumbnails")
-                        if (thumbs != null && thumbs.length() > 0) {
-                            for (i in 0 until thumbs.length()) {
-                                val tObj = thumbs.optJSONObject(i) ?: continue
-                                val w = tObj.optInt("width", 0)
-                                val u = tObj.optCleanString("url")
-                                if (u.isNotEmpty() && (w in 300..600)) {
-                                    thumb = u
-                                    break
-                                }
-                            }
-                            if (thumb.isEmpty()) {
-                                thumb = thumbs.optJSONObject(0)?.optCleanString("url") ?: ""
-                            }
-                        }
-                        if (thumb.isEmpty()) {
-                            thumb = if (id.isNotEmpty()) {
-                                "https://i.ytimg.com/vi/$id/mqdefault.jpg"
-                            } else {
-                                json.optCleanString("thumbnail")
-                            }
-                        }
-                        val parsedChannelId = json.optCleanString("channel_id")
-                        val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
-
-                        val width = json.optInt("width", 0)
-                        val height = json.optInt("height", 0)
-                        val rawAspectRatio = json.optDouble("aspect_ratio", 0.0)
-                        val aspectRatio = when {
-                            rawAspectRatio > 0.0 -> rawAspectRatio.toFloat()
-                            width > 0 && height > 0 -> width.toFloat() / height.toFloat()
-                            else -> 0f
-                        }
-
-                        videos.add(
-                            Video(
-                                id = id,
-                                title = title,
-                                channelTitle = uploader,
-                                durationSeconds = duration,
-                                durationText = formatDuration(duration),
-                                releaseDateText = releaseDateText,
-                                releaseTimestamp = timestamp,
-                                thumbnailUrl = thumb,
-                                webpageUrl = webpageUrl,
-                                channelId = parsedChannelId,
-                                aspectRatio = aspectRatio,
-                            )
-                        )
                     } catch (parseEx: Exception) {
                         Log.d(TAG, "Skipping line in search output: ${parseEx.message}")
                     }
@@ -1692,7 +1607,166 @@ class YtDlpManager private constructor(private val appContext: Context) {
     }
 
     /**
+     * Parses a Video domain model from a yt-dlp JSON item.
+     * Silently drops locked, membership-only, paywalled videos, and shorts.
+     */
+    fun parseVideo(json: org.json.JSONObject, isDirectUrl: Boolean = false, directUrl: String = ""): Video? {
+        if (isLockedVideo(json) || isShortVideo(json)) {
+            Log.d(TAG, "Silently dropping locked/short video: ${json.optCleanString("id")}")
+            return null
+        }
+
+        val id = json.optCleanString("id")
+        if (id.isEmpty()) return null
+
+        val title = json.optCleanString("title", "Untitled")
+        val uploader = json.optCleanString("uploader").ifEmpty {
+            json.optCleanString("channel").ifEmpty {
+                json.optCleanString("uploader_id").ifEmpty {
+                    json.optCleanString("creator").ifEmpty {
+                        json.optCleanString("channel_id").ifEmpty {
+                            "Unknown Channel"
+                        }
+                    }
+                }
+            }
+        }
+        val duration = json.optInt("duration", 0)
+        val rawTimestamp = json.optLong("timestamp", 0L)
+        val rawDate = json.optCleanString("upload_date")
+        val timestamp = if (rawTimestamp > 0L) {
+            rawTimestamp
+        } else if (rawDate.length == 8 && rawDate.all { it.isDigit() }) {
+            try {
+                val sdf = java.text.SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }
+                sdf.parse(rawDate)?.time?.div(1000L) ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+        } else {
+            0L
+        }
+        val releaseDateText = formatRelativeDate(timestamp, rawDate)
+
+        var thumb = ""
+        val thumbs = json.optJSONArray("thumbnails")
+        if (thumbs != null && thumbs.length() > 0) {
+            for (i in 0 until thumbs.length()) {
+                val tObj = thumbs.optJSONObject(i) ?: continue
+                val w = tObj.optInt("width", 0)
+                val u = tObj.optCleanString("url")
+                if (u.isNotEmpty() && (w in 300..600)) {
+                    thumb = u
+                    break
+                }
+            }
+            if (thumb.isEmpty()) {
+                thumb = thumbs.optJSONObject(0)?.optCleanString("url") ?: ""
+            }
+        }
+        if (thumb.isEmpty()) {
+            thumb = if (id.isNotEmpty()) {
+                "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+            } else {
+                json.optCleanString("thumbnail")
+            }
+        }
+        val parsedChannelId = json.optCleanString("channel_id")
+        val webpageUrl = if (isDirectUrl && directUrl.isNotBlank()) directUrl else "https://www.youtube.com/watch?v=$id"
+
+        val width = json.optInt("width", 0)
+        val height = json.optInt("height", 0)
+        val rawAspectRatio = json.optDouble("aspect_ratio", 0.0)
+        val aspectRatio = when {
+            rawAspectRatio > 0.0 -> rawAspectRatio.toFloat()
+            width > 0 && height > 0 -> width.toFloat() / height.toFloat()
+            else -> 0f
+        }
+
+        return Video(
+            id = id,
+            title = title,
+            channelTitle = uploader,
+            durationSeconds = duration,
+            durationText = formatDuration(duration),
+            releaseDateText = releaseDateText,
+            releaseTimestamp = timestamp,
+            thumbnailUrl = thumb,
+            webpageUrl = webpageUrl,
+            channelId = parsedChannelId,
+            aspectRatio = aspectRatio,
+        )
+    }
+
+    /**
+     * Internal worker to query a channel feed via --dump-single-json.
+     * Reuses the response to capture both video uploads and the channel avatar without redundant network trips.
+     */
+    private suspend fun fetchChannelFeed(
+        targetUrl: String,
+        channelId: String,
+        channelTitle: String,
+        maxResults: Int,
+        startIndex: Int,
+        priority: TaskPriority,
+        onAvatarExtracted: ((String) -> Unit)?
+    ): Result<List<Video>> = executeQueued(priority, "ChannelFeed:$targetUrl:$startIndex") {
+        try {
+            ensureReady()
+            val targetEnd = startIndex + maxResults - 1
+            val request = YoutubeDLRequest(targetUrl).apply {
+                addOption("--flat-playlist")
+                addOption("--dump-single-json")
+                addOption("--skip-download")
+                addOption("--no-warnings")
+                addOption("--playlist-start", startIndex.toString())
+                addOption("--playlist-end", targetEnd.toString())
+                addOption("--extractor-args", "youtubetab:approximate_date")
+            }
+
+            Log.i(TAG, "Fetching channel feed from '$targetUrl' (range: $startIndex..$targetEnd)")
+            val response = YoutubeDL.getInstance().execute(request)
+            val output = response.out.trim()
+            if (output.isEmpty() || !output.startsWith("{")) {
+                return@executeQueued Result.Success(emptyList())
+            }
+
+            val root = org.json.JSONObject(output)
+
+            // 1. Reuse existing thumbnails metadata to capture channel avatar
+            val thumbs = root.optJSONArray("thumbnails")
+            val avatarUrl = AvatarManager.extractAvatarUrlFromThumbnails(thumbs)
+            if (!avatarUrl.isNullOrBlank()) {
+                Log.d(TAG, "Extracted avatar from channel feed for $targetUrl: $avatarUrl")
+                onAvatarExtracted?.invoke(avatarUrl)
+            }
+
+            // 2. Parse video entries
+            val entries = root.optJSONArray("entries") ?: org.json.JSONArray()
+            val videos = mutableListOf<Video>()
+            for (i in 0 until entries.length()) {
+                val entry = entries.optJSONObject(i) ?: continue
+                val video = parseVideo(entry, isDirectUrl = false) ?: continue
+                videos.add(
+                    video.copy(
+                        channelId = channelId.ifEmpty { video.channelId },
+                        channelTitle = channelTitle.ifEmpty { video.channelTitle }
+                    )
+                )
+            }
+
+            Result.Success(videos)
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed fetching channel feed via dump-single-json, falling back to searchContent: ${e.message}")
+            searchContent(targetUrl, maxResults = maxResults, startIndex = startIndex, priority = priority)
+        }
+    }
+
+    /**
      * Fetches videos from a channel using its ID or handle with windowed pagination (--playlist-start and --playlist-end).
+     * Reuses channel feed metadata to opportunistically capture channel avatar via [onAvatarExtracted].
      * Automatically filters out private, membership-only, and locked videos.
      */
     suspend fun fetchChannelVideos(
@@ -1701,7 +1775,8 @@ class YtDlpManager private constructor(private val appContext: Context) {
         channelTitle: String = "",
         maxResults: Int = 30,
         startIndex: Int = 1,
-        priority: TaskPriority = TaskPriority.BACKGROUND
+        priority: TaskPriority = TaskPriority.BACKGROUND,
+        onAvatarExtracted: ((String) -> Unit)? = null
     ): Result<List<Video>> = withContext(networkDispatcher) {
         val target = when {
             channelId.startsWith("UC") -> "https://www.youtube.com/channel/$channelId/videos"
@@ -1716,7 +1791,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
         }
 
         val primaryResult = if (target.isNotEmpty()) {
-            searchContent(target, maxResults = maxResults, startIndex = startIndex, priority = priority)
+            fetchChannelFeed(
+                targetUrl = target,
+                channelId = channelId,
+                channelTitle = channelTitle,
+                maxResults = maxResults,
+                startIndex = startIndex,
+                priority = priority,
+                onAvatarExtracted = onAvatarExtracted
+            )
         } else {
             val targetEnd = startIndex + maxResults - 1
             searchContent("ytsearch$targetEnd:$channelTitle", maxResults = maxResults, startIndex = startIndex, priority = priority)
@@ -1748,6 +1831,45 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         Result.Success(fallback.data.map { it.copy(channelId = channelId) })
                     } else primaryResult
                 } else primaryResult
+            }
+        }
+    }
+
+    /**
+     * Dedicated yt-dlp fallback to extract channel avatar thumbnail if web scraping fails.
+     */
+    suspend fun fetchChannelAvatarOnly(
+        channelId: String,
+        handle: String = "",
+        priority: TaskPriority = TaskPriority.BACKGROUND
+    ): String? = withContext(networkDispatcher) {
+        val target = when {
+            channelId.startsWith("UC") -> "https://www.youtube.com/channel/$channelId"
+            handle.isNotBlank() && handle.startsWith("@") -> "https://www.youtube.com/$handle"
+            handle.isNotBlank() -> "https://www.youtube.com/@$handle"
+            channelId.isNotBlank() -> "https://www.youtube.com/channel/$channelId"
+            else -> ""
+        }
+        if (target.isEmpty()) return@withContext null
+
+        executeQueued(priority, "ChannelAvatar:$target") {
+            try {
+                ensureReady()
+                val request = YoutubeDLRequest(target).apply {
+                    addOption("--dump-single-json")
+                    addOption("--playlist-end", "1")
+                    addOption("--skip-download")
+                    addOption("--no-warnings")
+                }
+                val response = YoutubeDL.getInstance().execute(request)
+                val output = response.out.trim()
+                if (output.startsWith("{")) {
+                    val root = org.json.JSONObject(output)
+                    AvatarManager.extractAvatarUrlFromThumbnails(root.optJSONArray("thumbnails"))
+                } else null
+            } catch (e: Throwable) {
+                Log.w(TAG, "Failed extracting avatar via yt-dlp for $target: ${e.message}")
+                null
             }
         }
     }

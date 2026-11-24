@@ -21,14 +21,23 @@ object AvatarManager {
 
     /**
      * Resolves the channel avatar image URL by inspecting the channel's public og:image meta tag.
+     * Supports both canonical channel IDs (UC...) and channel handles (@handle).
      */
-    suspend fun fetchChannelAvatarUrl(channelId: String): String? = withContext(ResonDispatchers.Network) {
+    suspend fun fetchChannelAvatarUrl(channelId: String, handle: String = ""): String? = withContext(ResonDispatchers.Network) {
         val cleanId = channelId.trim()
-        if (cleanId.isEmpty() || !cleanId.startsWith("UC")) return@withContext null
+        val cleanHandle = handle.trim()
+        val target = when {
+            cleanId.startsWith("UC") -> "https://www.youtube.com/channel/$cleanId"
+            cleanHandle.isNotBlank() && cleanHandle.startsWith("@") -> "https://www.youtube.com/$cleanHandle"
+            cleanHandle.isNotBlank() -> "https://www.youtube.com/@$cleanHandle"
+            cleanId.startsWith("@") -> "https://www.youtube.com/$cleanId"
+            cleanId.isNotBlank() -> "https://www.youtube.com/channel/$cleanId"
+            else -> null
+        } ?: return@withContext null
 
         var connection: HttpURLConnection? = null
         try {
-            val url = URL("https://www.youtube.com/channel/$cleanId")
+            val url = URL(target)
             connection = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 6_000
                 readTimeout = 6_000
@@ -45,11 +54,54 @@ object AvatarManager {
                 null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed resolving avatar for $cleanId: ${e.message}")
+            Log.w(TAG, "Failed resolving avatar for $target: ${e.message}")
             null
         } finally {
             connection?.disconnect()
         }
+    }
+
+    /**
+     * Extracts the best square avatar image URL from a yt-dlp thumbnails JSONArray.
+     * Prioritizes uncropped square avatars (avatar_uncropped, or 1:1 aspect ratio),
+     * avoiding wide channel banners.
+     */
+    fun extractAvatarUrlFromThumbnails(thumbs: org.json.JSONArray?): String? {
+        if (thumbs == null || thumbs.length() == 0) return null
+
+        var bestUrl: String? = null
+        var bestScore = -1
+
+        for (i in 0 until thumbs.length()) {
+            val t = thumbs.optJSONObject(i) ?: continue
+            val u = t.optString("url", "").trim()
+            if (u.isEmpty()) continue
+
+            val id = t.optString("id", "").lowercase()
+            val w = t.optInt("width", 0)
+            val h = t.optInt("height", 0)
+
+            // Skip banner images explicitly
+            if (id.contains("banner") || (w > 0 && h > 0 && w.toFloat() / h > 2.0f)) {
+                continue
+            }
+
+            var score = 0
+            if (id == "avatar_uncropped") score += 100
+            else if (id.contains("avatar")) score += 80
+            else if (w > 0 && h > 0 && w == h) score += 60
+            else if (u.contains("=s") && !u.contains("=w")) score += 40
+
+            if (w in 88..500) score += 20
+
+            if (score > bestScore) {
+                bestScore = score
+                bestUrl = u
+            }
+        }
+
+        val finalUrl = bestUrl ?: thumbs.optJSONObject(0)?.optString("url", "")?.ifEmpty { null }
+        return finalUrl?.let { if (it.startsWith("//")) "https:$it" else it }
     }
 
     /**
@@ -68,6 +120,8 @@ object AvatarManager {
                 readTimeout = 8_000
                 instanceFollowRedirects = true
                 requestMethod = "GET"
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                setRequestProperty("Accept", "image/*,*/*;q=0.8")
             }
             connection.connect()
 
