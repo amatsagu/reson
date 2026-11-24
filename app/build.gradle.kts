@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.amatsagu.reson"
-        minSdk = 35
+        minSdk = 36
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
@@ -21,7 +21,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += setOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            abiFilters += setOf("arm64-v8a")
         }
     }
 

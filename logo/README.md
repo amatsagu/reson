@@ -29,7 +29,7 @@ Design drafts and alternative explorations are archived in `logo_designs/`.
 
 ## Android Resource Mapping
 
-### 1. Adaptive App Icons (API 26+)
+### 1. Adaptive App Icons
 - Standard Launcher: `app/src/main/res/mipmap-anydpi/ic_launcher.xml`
 - Round Launcher: `app/src/main/res/mipmap-anydpi/ic_launcher_round.xml`
   - Background Vector: `app/src/main/res/drawable/ic_launcher_background.xml` (108x108 dp)

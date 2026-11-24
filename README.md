@@ -28,7 +28,8 @@ Reson lets you follow your favorite YouTube channels, stream audio in the backgr
 - **Audio Engine**: AndroidX Media3 (ExoPlayer) + MediaSessionService
 - **Extraction**: Embedded yt-dlp binary with Python runtime
 - **Storage**: SQLite
-- **Minimum Android version**: Android 8.0 (API level 26)
+- **Architecture**: 64-bit ARM (`arm64-v8a`)
+- **Minimum Android version**: Android 16 (API level 36)
 
 ## Building from Source
 
