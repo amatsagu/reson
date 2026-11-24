@@ -1,60 +1,54 @@
-# Reson Official Brand Identity & Logo Assets
+# Reson Brand Identity and Logo Assets
 
-## The Official Logo: Puffy Bubble "R" (Cotton Candy Theme)
-The official logo for **Reson** is the whimsical, tactile **Puffy Bubble "R"** in the **Cotton Candy** palette. It represents a playful, friendly, and modern audio identity without leaning on generic play triangles or character faces.
+## Overview
+The primary identity for Reson is the stylized "R" glyph in the Cotton Candy colorway. It provides a distinct, modern visual mark across application launchers, in-app branding, and system notifications.
 
----
+## Color Palette
 
-## 🎨 Color Palette Specifications
-
-### App Launcher (Full Color)
-- **Background**: Dark Nebula Navy Gradient
+### App Launcher
+- **Background**: Dark Navy Gradient
   - Start (Top): `#0E1324`
   - End (Bottom): `#060912`
-- **Puffy Bubble Glyph**: Cotton Candy Linear Gradient (45° angle)
-  - Start (Upper Left): `#F472B6` (Bubblegum Pink)
-  - End (Lower Right): `#38BDF8` (Sky Blue)
-- **Gloss Highlights**:
-  - Upper Rim Gloss: Pure White with 65% opacity (`#A6FFFFFF`), rounded cap stroke
-  - Stem Vertical Gloss: Pure White with 55% opacity (`#8CFFFFFF`), rounded cap stroke
+- **Glyph Body**: Linear Gradient (45-degree angle)
+  - Start (Upper Left): `#F472B6`
+  - End (Lower Right): `#38BDF8`
+- **Highlights**:
+  - Upper Rim Gloss: `#A6FFFFFF` (pure white, 65% opacity)
+  - Stem Gloss: `#8CFFFFFF` (pure white, 55% opacity)
 
-### Monochrome & Notification (Android 12 / 13+)
-- **Body**: `#FFFFFF` (100% white) with EvenOdd cutout for the organic pebble counter hole.
-- **Background**: Transparent / System Wallpaper Dynamic Tint.
+### Monochrome and Notification (Android 12+)
+- **Body**: `#FFFFFF` (100% white) with EvenOdd counter cutout
+- **Background**: Transparent / system dynamic wallpaper tint
 
----
+## Source Files
+Located in this directory (`logo/`):
+- `reson_logo_cotton_candy.svg` - 512x512 master vector in Cotton Candy palette
+- `reson_logo_monochrome.svg` - 512x512 master monochrome vector
 
-## 📁 Source Vector Files
-Located in [`logo/`](./):
-- [`reson_logo_cotton_candy.svg`](./reson_logo_cotton_candy.svg) — 512×512 Master Vector SVG in full Cotton Candy theme.
-- [`reson_logo_monochrome.svg`](./reson_logo_monochrome.svg) — 512×512 Master Monochrome Vector SVG.
+Design drafts and alternative explorations are archived in `logo_designs/`.
 
-Alternative explorations and colorways remain preserved in [`logo_designs/`](../logo_designs/).
-
----
-
-## 📱 Android Resource Registration & Architecture
+## Android Resource Mapping
 
 ### 1. Adaptive App Icons (API 26+)
-- **Standard Launcher**: [`app/src/main/res/mipmap-anydpi/ic_launcher.xml`](../app/src/main/res/mipmap-anydpi/ic_launcher.xml)
-- **Round Launcher**: [`app/src/main/res/mipmap-anydpi/ic_launcher_round.xml`](../app/src/main/res/mipmap-anydpi/ic_launcher_round.xml)
-  - **Background Vector**: [`app/src/main/res/drawable/ic_launcher_background.xml`](../app/src/main/res/drawable/ic_launcher_background.xml) (108×108dp canvas)
-  - **Foreground Vector**: [`app/src/main/res/drawable/ic_launcher_foreground.xml`](../app/src/main/res/drawable/ic_launcher_foreground.xml) (centered within the 72dp safe zone)
-  - **Themed Monochrome Vector**: [`app/src/main/res/drawable/ic_launcher_monochrome.xml`](../app/src/main/res/drawable/ic_launcher_monochrome.xml) (Material You dynamic wallpaper theming on Android 13+)
+- Standard Launcher: `app/src/main/res/mipmap-anydpi/ic_launcher.xml`
+- Round Launcher: `app/src/main/res/mipmap-anydpi/ic_launcher_round.xml`
+  - Background Vector: `app/src/main/res/drawable/ic_launcher_background.xml` (108x108 dp)
+  - Foreground Vector: `app/src/main/res/drawable/ic_launcher_foreground.xml` (centered in 72 dp safe zone)
+  - Monochrome Vector: `app/src/main/res/drawable/ic_launcher_monochrome.xml` (dynamic Material You tinting on Android 13+)
 
-### 2. Status Bar & Media Notifications
-- **Small Icon**: [`app/src/main/res/drawable/ic_notification.xml`](../app/src/main/res/drawable/ic_notification.xml) (24×24dp monochrome vector)
-- Linked in [`app/src/main/AndroidManifest.xml`](../app/src/main/AndroidManifest.xml) under `ResonPlaybackService` via:
+### 2. Status Bar and Media Notifications
+- Small Icon: `app/src/main/res/drawable/ic_notification.xml` (24x24 dp monochrome vector)
+- Declared in `app/src/main/AndroidManifest.xml` under `ResonPlaybackService`:
   ```xml
   <meta-data
       android:name="androidx.media3.session.notification.small_icon"
       android:resource="@drawable/ic_notification" />
   ```
 
-### 3. Legacy Density Mipmaps (Fallback for non-adaptive launchers)
-Optimized WebP raster assets generated at standard density buckets:
-- `mipmap-mdpi/`: 48×48 px (`ic_launcher.webp`, `ic_launcher_round.webp`)
-- `mipmap-hdpi/`: 72×72 px (`ic_launcher.webp`, `ic_launcher_round.webp`)
-- `mipmap-xhdpi/`: 96×96 px (`ic_launcher.webp`, `ic_launcher_round.webp`)
-- `mipmap-xxhdpi/`: 144×144 px (`ic_launcher.webp`, `ic_launcher_round.webp`)
-- `mipmap-xxxhdpi/`: 192×192 px (`ic_launcher.webp`, `ic_launcher_round.webp`)
+### 3. Density Mipmaps
+Optimized WebP raster assets for legacy launchers:
+- `mipmap-mdpi/`: 48x48 px
+- `mipmap-hdpi/`: 72x72 px
+- `mipmap-xhdpi/`: 96x96 px
+- `mipmap-xxhdpi/`: 144x144 px
+- `mipmap-xxxhdpi/`: 192x192 px
