@@ -51,20 +51,12 @@ import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Video
 import com.amatsagu.reson.ui.components.VideoItem
 
-/**
- * Sub-view modes for the Library screen.
- */
 enum class LibrarySubView {
     Overview,
     FullHistory,
     FullDownloads
 }
 
-/**
- * Library screen displaying two primary content streams:
- * 1. Listening History (recent 5 on overview with button to view full list)
- * 2. Locally Downloaded / Offline Videos (recent 5 on overview with button to view full list)
- */
 @Composable
 fun LibraryScreen(
     historyVideos: List<Video>,
@@ -83,7 +75,6 @@ fun LibraryScreen(
     var subView by remember { mutableStateOf(LibrarySubView.Overview) }
     var showClearHistoryDialog by remember { mutableStateOf(value = false) }
 
-    // Intercept back navigation when in sub-views
     BackHandler(enabled = subView != LibrarySubView.Overview) {
         subView = LibrarySubView.Overview
     }
@@ -158,7 +149,6 @@ fun LibraryScreen(
         }
     }
 
-    // Confirmation dialog for clearing playback history
     if (showClearHistoryDialog) {
         AlertDialog(
             onDismissRequest = { showClearHistoryDialog = false },
@@ -200,9 +190,6 @@ fun LibraryScreen(
     }
 }
 
-/**
- * Library overview screen presenting the 5 most recent items from History and Downloads.
- */
 @Composable
 private fun LibraryOverviewView(
     historyVideos: List<Video>,
@@ -229,9 +216,6 @@ private fun LibraryOverviewView(
         contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // =========================================================================
-        // 1. History Section
-        // =========================================================================
         item(key = "history_section_header") {
             LibrarySectionHeader(
                 title = stringResource(R.string.library_history_title),
@@ -296,9 +280,6 @@ private fun LibraryOverviewView(
             Spacer(modifier = Modifier.height(4.dp))
         }
 
-        // =========================================================================
-        // 2. Offline Videos / Downloads Section
-        // =========================================================================
         item(key = "downloads_section_header") {
             LibrarySectionHeader(
                 title = stringResource(R.string.library_downloads_title),
@@ -356,9 +337,6 @@ private fun LibraryOverviewView(
     }
 }
 
-/**
- * Full scrollable list view for either History or Downloads.
- */
 @Composable
 private fun FullListView(
     title: String,
@@ -383,7 +361,6 @@ private fun FullListView(
             .fillMaxSize()
             .padding(contentPadding)
     ) {
-        // Navigation Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()

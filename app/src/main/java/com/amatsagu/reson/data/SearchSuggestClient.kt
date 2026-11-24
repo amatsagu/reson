@@ -9,10 +9,6 @@ import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
-/**
- * Fast YouTube autocomplete client.
- * Uses YouTube's lightweight public suggestion API with zero latency.
- */
 object SearchSuggestClient {
 
     private const val TAG = "Reson:Suggest"

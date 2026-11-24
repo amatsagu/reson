@@ -5,19 +5,15 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import com.amatsagu.reson.model.Video
 
-/**
- * Data access operations for the videos table.
- */
 class VideoDao {
 
     fun upsertVideo(db: SQLiteDatabase, video: Video, channelId: String = "") {
         val effectiveChannelId = video.channelId.ifEmpty { channelId }
         val values = toContentValues(video, effectiveChannelId)
 
-        // Try inserting with CONFLICT_IGNORE if row is new
         val rowId = db.insertWithOnConflict("videos", null, values, SQLiteDatabase.CONFLICT_IGNORE)
         if (rowId == -1L) {
-            // Row already exists: update fields while preserving existing playback, download, and created_at states
+            // Row already exists: update metadata without overwriting existing playback and download progress
             values.remove("created_at")
             val existing = getVideoById(db, video.id)
             if (existing != null) {
@@ -87,9 +83,6 @@ class VideoDao {
         return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
-    /**
-     * Fetches unwatched videos from followed channels (last_played_at == 0 and playback_progress == 0).
-     */
     fun getUnwatchedFollowedVideos(
         db: SQLiteDatabase,
         limit: Int = 30,
@@ -113,10 +106,6 @@ class VideoDao {
         return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
-    /**
-     * Fetches recommended discovery videos (channels NOT followed) that have not been watched yet.
-     * Hidden bias: Sorts videos/channels without "news" or "america" before biased ones.
-     */
     fun getRecommendedDiscoveryVideos(
         db: SQLiteDatabase,
         limit: Int = 30,
@@ -168,10 +157,6 @@ class VideoDao {
         return queryVideos(db, query, arrayOf(channelId, safeLimit.toString(), safeOffset.toString()))
     }
 
-    /**
-     * Fetches all videos from followed channels released within the last 1 month (cutoff: minTimestampSec),
-     * ordered by release date/time (newest first).
-     */
     fun getVideosFromFollowedWithinMonth(
         db: SQLiteDatabase,
         minTimestampSec: Long,
@@ -238,10 +223,6 @@ class VideoDao {
         return updated
     }
 
-    /**
-     * Trims listening history to at most maxRecords (default 100) by clearing playback state
-     * on the oldest records beyond the limit.
-     */
     fun trimListeningHistory(db: SQLiteDatabase, maxRecords: Int = 100) {
         val safeMax = maxRecords.coerceIn(10, 1000)
         val query = """
@@ -257,16 +238,7 @@ class VideoDao {
         db.execSQL(query, arrayOf(safeMax.toString()))
     }
 
-    /**
-     * Safely bounds the unplayed discovery video cache to prevent indefinite accumulation.
-     * STRICT SAFETY GUARANTEES:
-     * 1. NEVER deletes any video that has been played (last_played_at > 0, playback_progress > 0, playback_position_ms > 0)
-     * 2. NEVER deletes any video in Continue Listening or History
-     * 3. NEVER deletes any downloaded video (is_downloaded = 1 or download_file_path is non-null)
-     * 4. NEVER deletes any video from followed channels (matched by channel_id OR channel_title)
-     * 5. NEVER deletes based on age/timestamp (preserves offline feed browsing without unexpected drops)
-     * 6. ONLY removes excess unplayed discovery items if the unplayed pool exceeds [maxDiscoveryCount] (default 600)
-     */
+    // Safely prunes unplayed discovery videos; never touches played, continue, downloaded, or followed videos
     fun pruneOldDiscoveryVideos(db: SQLiteDatabase, maxDiscoveryCount: Int = 600) {
         val safeMaxDiscovery = maxDiscoveryCount.coerceIn(50, 2000)
         val countQuery = """
@@ -287,7 +259,6 @@ class VideoDao {
             if (cursor.moveToFirst()) cursor.getInt(0) else 0
         }
 
-        // If within safety quota, do not delete anything
         if (totalUnplayedDiscovery <= safeMaxDiscovery) return
 
         val toDeleteCount = totalUnplayedDiscovery - safeMaxDiscovery
@@ -312,9 +283,6 @@ class VideoDao {
         db.execSQL(deleteQuery, arrayOf(toDeleteCount.toString()))
     }
 
-    /**
-     * Clears all unplayed, non-downloaded discovery videos from non-followed channels.
-     */
     fun clearUnplayedDiscoveryVideos(db: SQLiteDatabase) {
         val deleteQuery = """
             DELETE FROM videos
@@ -332,9 +300,6 @@ class VideoDao {
         db.execSQL(deleteQuery)
     }
 
-    /**
-     * Purges all YouTube Shorts from SQLite storage.
-     */
     fun deleteShortVideos(db: SQLiteDatabase): Int {
         val where = "(aspect_ratio > 0.0 AND aspect_ratio < 1.0) OR id = 'EKmQ-TwVLts' OR title LIKE '%#shorts%' OR title LIKE '%#short%' OR webpage_url LIKE '%/shorts/%' OR title LIKE '%[Private video]%' OR title LIKE '%[Deleted video]%' OR title LIKE '%members-only%' OR title LIKE '%members only%'"
         return db.delete("videos", where, null)

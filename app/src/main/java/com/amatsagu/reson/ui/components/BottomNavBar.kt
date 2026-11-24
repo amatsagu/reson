@@ -19,9 +19,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amatsagu.reson.model.ResonTab
 
-/**
- * Bottom navigation bar with dynamic system colors and localized tab titles.
- */
 @Composable
 fun ResonBottomNavBar(
     selectedTab: ResonTab,

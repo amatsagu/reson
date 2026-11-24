@@ -113,9 +113,6 @@ val PuffyThemes = listOf(
     ),
 )
 
-/**
- * Puffy Bubble 'R' Color Variants Showcase
- */
 @Preview(name = "Puffy Bubble Color Variants Showcase", showBackground = true, widthDp = 420, heightDp = 2250)
 @Composable
 fun PuffyBubblePaletteShowcasePreview() {
@@ -226,9 +223,6 @@ private fun BubbleVariantCard(theme: BubbleTheme) {
     }
 }
 
-// =============================================================
-// Individual Previews for High-Res Extraction
-// =============================================================
 @Preview(name = "1. Pastel Lilac - Color", widthDp = 108, heightDp = 108)
 @Composable
 fun PreviewPastelLilac() {
@@ -277,9 +271,6 @@ fun PreviewMonochrome() {
     PuffyBubbleRIcon(theme = PuffyThemes[0], isMonochrome = true)
 }
 
-// =============================================================
-// Core Puffy Bubble 'R' Component
-// =============================================================
 @Composable
 fun PuffyBubbleRIcon(
     theme: BubbleTheme,

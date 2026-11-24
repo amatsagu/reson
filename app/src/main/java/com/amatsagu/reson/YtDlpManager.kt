@@ -38,28 +38,17 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.log10
 import kotlin.random.Random
 
-/**
- * Coroutine context element to detect if execution is already within queueWorkerJob,
- * avoiding re-entrancy deadlocks on nested executeQueued calls.
- */
 private object QueueWorkerElement : CoroutineContext.Element {
     override val key: CoroutineContext.Key<QueueWorkerElement> = Key
     object Key : CoroutineContext.Key<QueueWorkerElement>
 }
 
-/**
- * Priority levels for yt-dlp execution to ensure smooth UI responsiveness
- * while strictly preventing rate limits.
- */
 enum class TaskPriority(val weight: Int) {
     IMMEDIATE(3),   // Direct user playback & automatic stream recovery
     INTERACTIVE(2), // Search queries, autocomplete, UI exploration
     BACKGROUND(1)   // Channel sync, avatar caching, version updates
 }
 
-/**
- * Task item stored in the PriorityBlockingQueue.
- */
 private class QueuedTask<T>(
     val id: Long,
     val priority: TaskPriority,
@@ -84,9 +73,6 @@ private class QueuedTask<T>(
     }
 }
 
-/**
- * State representing the lifecycle and health of yt-dlp.
- */
 sealed interface YtDlpState {
     data object Uninitialized : YtDlpState
     data object Initializing : YtDlpState
@@ -95,28 +81,17 @@ sealed interface YtDlpState {
     data class Error(val message: String, val canRecover: Boolean = true) : YtDlpState
 }
 
-/**
- * Result wrapper for engine operations.
- */
 sealed class Result<out T> {
     data class Success<T>(val data: T) : Result<T>()
     data class Failure(val error: Throwable, val message: String) : Result<Nothing>()
 }
 
-/**
- * Observable rate-limit and blocking status for YouTube operations.
- */
 sealed interface RateLimitStatus {
     data object Normal : RateLimitStatus
     data class Throttled(val backoffSeconds: Long) : RateLimitStatus
     data class Blocked(val message: String, val backoffSeconds: Long) : RateLimitStatus
 }
 
-/**
- * Singleton manager for yt-dlp operations on Android.
- * Features smart serialized priority queuing, rate-limit avoidance with exponential backoff,
- * multi-client playback fallback (Android -> iOS -> TV), and network handoff awareness.
- */
 class YtDlpManager private constructor(private val appContext: Context) {
 
     private val _state = MutableStateFlow<YtDlpState>(YtDlpState.Uninitialized)
@@ -206,10 +181,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
         }
 
-        /**
-         * Checks if an extraction failure was caused by supporter/member restrictions, paywalls,
-         * or private authentication gates that cannot be bypassed without user login.
-         */
         fun isLockedVideoError(error: Throwable): Boolean {
             val msg = (error.message ?: "").lowercase()
             return msg.contains("members-only") ||
@@ -222,10 +193,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     msg.contains("private video")
         }
 
-        /**
-         * Identifies whether a raw video entry from yt-dlp is locked/supporters-only/members-only/paywalled
-         * or an upcoming unreleased premiere, so it is silently dropped across all searches and feeds.
-         */
         fun isLockedVideo(json: org.json.JSONObject): Boolean {
             val availability = json.optCleanString("availability").lowercase()
             if (availability in setOf("subscriber_only", "needs_auth", "premium_only", "private", "rental", "purchase")) {
@@ -264,9 +231,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
             return isLockedVideoTitle(title)
         }
 
-        /**
-         * Checks a video title for explicit supporters/members-only badges, bracketed tags, or private/deleted status.
-         */
         fun isLockedVideoTitle(title: String): Boolean {
             if (title.isBlank()) return true
             if (title.equals("[Private video]", ignoreCase = true) ||
@@ -286,17 +250,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
         private val SHORTS_TITLE_REGEX = "(?i)(?:#shorts?\\b|[\\[(]shorts?[])]<!--|/shorts/|(?:^|[-|•:])\\s*shorts?\\s*(?:$|[-|•:]))".replace("<!--", "").toRegex()
         private val BIAS_NEWS_AMERICA_REGEX = "(?i)\\b(news|america[ns]?)\\b".toRegex()
 
-        /**
-         * Checks whether a video title indicates a YouTube Short.
-         */
         fun isShortVideoTitle(title: String): Boolean {
             return title.isNotBlank() && SHORTS_TITLE_REGEX.containsMatchIn(title)
         }
 
-        /**
-         * Identifies whether a raw video entry from yt-dlp is a YouTube Short,
-         * checking url patterns, title/description tags, tags array, and vertical aspect ratio (height > width).
-         */
         fun isShortVideo(json: org.json.JSONObject): Boolean {
             val url = json.optCleanString("url")
             val webpageUrl = json.optCleanString("webpage_url")
@@ -348,9 +305,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
             return false
         }
 
-        /**
-         * Checks if a domain Video object is a YouTube Short, locked, private, or vertical format.
-         */
         fun isShortVideo(video: Video): Boolean {
             return isShortVideoTitle(video.title) ||
                     video.webpageUrl.contains("/shorts/") ||
@@ -358,10 +312,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     isLockedVideoTitle(video.title)
         }
 
-        /**
-         * Checks whether a channel or video has a hidden bias towards 'news' or 'america'.
-         * Returns false if the channel is followed.
-         */
         fun hasNewsOrAmericaBias(
             title: String,
             channelTitle: String = "",
@@ -374,10 +324,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
                     BIAS_NEWS_AMERICA_REGEX.containsMatchIn(handle)
         }
 
-        /**
-         * Formats release date into compact relative time to save space:
-         * e.g. "57m ago", "1d3h ago", "3d ago", "2w ago", "4mo ago", "2y ago".
-         */
         fun formatRelativeDate(timestampSec: Long, rawUploadDate: String = ""): String {
             val nowSec = System.currentTimeMillis() / 1000L
             val targetSec = if (timestampSec > 0) {
@@ -450,9 +396,6 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
         }
 
-        /**
-         * Parses text subscriber count (e.g. "4.34M subscribers", "462K subscribers", "12 subscribers") into a Long.
-         */
         fun parseSubscriberCount(text: String?): Long {
             if (text.isNullOrBlank()) return 0L
             val cleaned = text.trim()
@@ -469,20 +412,12 @@ class YtDlpManager private constructor(private val appContext: Context) {
             }
         }
 
-        /**
-         * Cleans version string by removing any engine prefixes like "yt-dlp "
-         * so only clean semantic/date version numbers are displayed in the UI.
-         */
         fun cleanVersion(raw: String?): String {
             if (raw.isNullOrBlank()) return "Unknown"
             val cleaned = raw.replace("(?i)yt-dlp\\s*".toRegex(), "").trim()
             return cleaned.ifEmpty { raw.trim() }
         }
 
-        /**
-         * Computes similarity between search query and channel name/handle (0.0 to 1.0).
-         * Normalizes alphanumeric text (ignoring spaces, case, and punctuation) to match YouTube's behavior.
-         */
         fun calculateSimilarity(query: String, title: String, handle: String): Double {
             val qNorm = query.lowercase().filter { it.isLetterOrDigit() }
             val tNorm = title.lowercase().filter { it.isLetterOrDigit() }
@@ -516,19 +451,12 @@ class YtDlpManager private constructor(private val appContext: Context) {
             return 0.0
         }
 
-        /**
-         * Checks if the search query matches the channel handle perfectly (with or without '@' prefix).
-         */
         fun isHandleExactMatch(query: String, handle: String): Boolean {
             val q = query.trim().lowercase().removePrefix("@")
             val h = handle.trim().lowercase().removePrefix("@")
             return (q.isNotEmpty()) && (q == h)
         }
 
-        /**
-         * Filters out random channels with low similarity (< 0.45), and sorts matching channels
-         * by similarity score, subscriber count, and whether they have active recent videos.
-         */
         fun filterAndRankChannels(
             query: String,
             channels: List<Channel>,

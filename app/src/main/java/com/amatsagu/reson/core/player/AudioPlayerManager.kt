@@ -39,9 +39,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
-/**
- * Snapshot of the audio player state.
- */
 data class PlaybackState(
     val currentVideo: Video? = null,
     val isPlaying: Boolean = false,
@@ -54,11 +51,6 @@ data class PlaybackState(
     val errorMessage: String? = null,
 )
 
-/**
- * Manager handling on-the-fly audio streaming playback using Media3 ExoPlayer.
- * Features smart HTTP range streaming, fast 500ms startup load control, mobile network
- * error recovery, audio focus management, and automatic state emission.
- */
 @OptIn(UnstableApi::class)
 class AudioPlayerManager(
     private val context: Context,
@@ -188,7 +180,6 @@ class AudioPlayerManager(
                     }
                 }
                 Player.STATE_IDLE -> {
-                    // If idle and was not stopped intentionally, we may need recovery
                     if (!isRecovering) {
                         _playbackState.update { it.copy(isBuffering = false) }
                     }
@@ -211,7 +202,6 @@ class AudioPlayerManager(
                 return
             }
 
-            // If offline, pause and await network restoration instead of exhausting recovery attempts
             if (!networkMonitor.isOnline()) {
                 Log.w(TAG, "Playback error occurred while offline. Waiting for network connection...")
                 val video = _playbackState.value.currentVideo
@@ -229,7 +219,6 @@ class AudioPlayerManager(
                 return
             }
 
-            // Check if automatic self-recovery should be attempted
             val video = _playbackState.value.currentVideo
             if (video != null && recoveryAttempts < MAX_RECOVERY_ATTEMPTS && onStreamRecoveryRequested != null) {
                 recoveryAttempts++
@@ -426,9 +415,6 @@ class AudioPlayerManager(
         }
     }
 
-    /**
-     * Prepares and streams audio from direct HTTP stream URL or local file URI with atomic start position.
-     */
     fun play(video: Video, mediaUri: String, isLocal: Boolean = false, initialPositionMs: Long = 0L) {
         scope.launch {
             try {
@@ -442,7 +428,6 @@ class AudioPlayerManager(
                 val safePosition = initialPositionMs.coerceAtLeast(0L)
                 val effectiveDuration = if (video.playbackDurationMs > 0) video.playbackDurationMs else (video.durationSeconds * 1000L)
 
-                // Reset playback speed to default 1.0f on video change/start (in-memory per audio state)
                 currentPlaybackSpeed = 1.0f
                 exoPlayer.setPlaybackSpeed(1.0f)
 
@@ -495,9 +480,6 @@ class AudioPlayerManager(
         }
     }
 
-    /**
-     * Resumes playback with a fresh stream URL after token expiration or network reconnection.
-     */
     fun resumeWithFreshUrl(newUrl: String, positionMs: Long) {
         scope.launch {
             val video = _playbackState.value.currentVideo ?: return@launch
@@ -718,7 +700,6 @@ class AudioPlayerManager(
                     )
                 }
 
-                // Accurate real-time listening accumulation while audio is actively playing and ready
                 val nowRealtime = android.os.SystemClock.elapsedRealtime()
                 val tickElapsed = if (lastListeningTickRealtime > 0L) (nowRealtime - lastListeningTickRealtime) else 0L
                 lastListeningTickRealtime = nowRealtime
@@ -732,11 +713,9 @@ class AudioPlayerManager(
                     }
                 }
 
-                // Check buffering stall watchdog
                 if (exoPlayer.playbackState == Player.STATE_BUFFERING) {
                     continuousBufferingMs += 400L
 
-                    // If buffering stalls past 20s, surface reassuring hint without stopping background recovery
                     if (continuousBufferingMs >= 20_000L) {
                         _playbackState.update {
                             it.copy(
@@ -770,7 +749,6 @@ class AudioPlayerManager(
                     }
                 }
 
-                // Periodically persist progress to database every 3 seconds
                 if (abs(current - lastSavedPositionMs) >= 3000L) {
                     saveCurrentProgress()
                 }

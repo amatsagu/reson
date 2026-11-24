@@ -12,10 +12,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 
-/**
- * Section header that smartly displays the full title (e.g. "Recommended content", "Continue listening")
- * and dynamically shortens to the short title (e.g. "Recommended", "Continue") when horizontal space is constrained.
- */
 @Composable
 fun AdaptiveSectionHeader(
     fullTitle: String,

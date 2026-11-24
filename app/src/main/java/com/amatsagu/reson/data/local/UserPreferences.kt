@@ -8,9 +8,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Material design theme color choices for Reson.
- */
 enum class ThemeColor(
     val id: String,
     val displayName: String,
@@ -30,9 +27,6 @@ enum class ThemeColor(
     }
 }
 
-/**
- * Manages user preferences: theme color, recommendations toggle, language, and listening stats.
- */
 class UserPreferences private constructor(context: Context) {
 
     private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences(

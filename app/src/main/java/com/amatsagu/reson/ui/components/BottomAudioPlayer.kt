@@ -73,9 +73,6 @@ import com.amatsagu.reson.model.ResonTab
 import com.amatsagu.reson.model.Video
 import java.util.Locale
 
-/**
- * Formats milliseconds into standard MM:SS or H:MM:SS audio format.
- */
 fun formatPlaybackTime(ms: Long): String {
     val totalSeconds = (ms / 1000).coerceAtLeast(0)
     val hours = totalSeconds / 3600
@@ -88,14 +85,8 @@ fun formatPlaybackTime(ms: Long): String {
     }
 }
 
-/**
- * Supported audio playback speeds in Reson.
- */
 val AVAILABLE_PLAYBACK_SPEEDS: List<Float> = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f)
 
-/**
- * Formats a speed float into human-friendly tempo notation (e.g. 1.0 -> "1x", 1.25 -> "1.25x").
- */
 fun formatPlaybackSpeed(speed: Float): String {
     return if (speed == speed.toLong().toFloat()) {
         "${speed.toInt()}x"
@@ -104,9 +95,6 @@ fun formatPlaybackSpeed(speed: Float): String {
     }
 }
 
-/**
- * Dialog prompt for choosing playback speed without needing a full-screen player.
- */
 @Composable
 fun PlaybackSpeedDialog(
     currentSpeed: Float,
@@ -169,15 +157,6 @@ fun PlaybackSpeedDialog(
     )
 }
 
-/**
- * Interactive audio progress bar matching Reson's design language:
- * Flat rounded track with NO circle thumb dot, supporting both tap-to-seek and drag-to-seek.
- *
- * Mathematically scaled thickness based on Continue Section progress bar:
- * ContinueCard progress bar is 4dp high across 124dp width (ratio = 4/124).
- * Main audio player thickness scales proportionally with width (size.width * (4f / 124f)),
- * rendered directly in the Draw phase (drawWithCache) for 120 FPS zero-recomposition performance.
- */
 @Composable
 fun InteractiveResonProgressBar(
     progress: () -> Float,
@@ -219,15 +198,12 @@ fun InteractiveResonProgressBar(
                 )
             }
             .drawWithCache {
-                // Mathematically scaled thickness:
-                // Continue Section progress bar has height 4dp across 124dp width (ratio = 4/124).
-                // Main audio player scales height proportionally to its rendered width:
+                // Ratio matches ContinueCard progress bar (4dp / 124dp)
                 val trackHeight = size.width * (4f / 124f)
                 val cornerRadius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
                 val yOffset = (size.height - trackHeight) / 2f
 
                 onDrawBehind {
-                    // Background track
                     drawRoundRect(
                         color = trackColor,
                         topLeft = Offset(0f, yOffset),
@@ -235,7 +211,6 @@ fun InteractiveResonProgressBar(
                         cornerRadius = cornerRadius
                     )
 
-                    // Active progress - read directly in Draw phase to eliminate recompositions
                     val displayRatio = if (isDragging) dragRatio else progress()
                     val clampedRatio = displayRatio.coerceIn(0f, 1f)
                     if (clampedRatio > 0f) {
@@ -251,10 +226,6 @@ fun InteractiveResonProgressBar(
     )
 }
 
-/**
- * Isolated timestamp display to localize text recompositions strictly to once-per-second,
- * keeping the outer player content and lazy lists completely static.
- */
 @Composable
 fun PlaybackTimestamps(
     positionMs: () -> Long,
@@ -281,7 +252,6 @@ fun PlaybackTimestamps(
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        // Center bottom: playback speed button matching the font size and style of time text
         val isCustomSpeed = playbackSpeed != 1.0f
         val speedTextColor = if (isCustomSpeed) {
             MaterialTheme.colorScheme.primary
@@ -322,10 +292,6 @@ fun PlaybackTimestamps(
     }
 }
 
-/**
- * Inner content of the Audio Player showing miniature, title, channel, play/pause with spinner,
- * close button, flat interactive seek bar (no thumb dot), and current/remaining timestamps.
- */
 @Composable
 fun BottomAudioPlayerContent(
     video: Video,
@@ -364,12 +330,10 @@ fun BottomAudioPlayerContent(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        // Main info row: Thumbnail + Title & Author + Speed + Play/Pause & Close buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Video miniature thumbnail
             if (video.thumbnailUrl.isNotBlank()) {
                 AsyncImage(
                     model = video.thumbnailUrl,
@@ -448,7 +412,6 @@ fun BottomAudioPlayerContent(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Play / Pause Button with Buffering spinner
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -479,7 +442,6 @@ fun BottomAudioPlayerContent(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // Close Button
             IconButton(
                 onClick = onCloseClick,
                 modifier = Modifier.size(36.dp)
@@ -493,7 +455,6 @@ fun BottomAudioPlayerContent(
             }
         }
 
-        // Interactive seek bar (no circle thumb dot)
         InteractiveResonProgressBar(
             progress = {
                 if (effectiveDurationMs > 0) (currentPos.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f) else 0f
@@ -506,7 +467,6 @@ fun BottomAudioPlayerContent(
             modifier = Modifier.padding(top = 2.dp)
         )
 
-        // Time indicator bar (Current elapsed on left, remaining on right, speed in center bottom)
         PlaybackTimestamps(
             positionMs = { currentPos },
             durationMs = effectiveDurationMs,
@@ -527,10 +487,6 @@ fun BottomAudioPlayerContent(
     }
 }
 
-/**
- * Modern unified bottom container merging the active audio player and the 3-tab navigation bar
- * seamlessly into a single cohesive Material 3 surface.
- */
 @Composable
 fun ResonUnifiedBottomBar(
     currentVideo: Video?,
@@ -621,11 +577,6 @@ fun ResonUnifiedBottomBar(
     }
 }
 
-/**
- * Animated banner alerting the user when the device is completely offline
- * or when YouTube is persistently blocking requests (HTTP 429 / Captcha),
- * docked seamlessly on top of the bottom audio player / navigation bar.
- */
 @Composable
 fun NetworkStatusBanner(
     isRateLimitBlocked: Boolean,

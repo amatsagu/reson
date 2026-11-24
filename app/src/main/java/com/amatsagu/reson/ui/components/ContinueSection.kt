@@ -45,10 +45,6 @@ import coil.compose.AsyncImage
 import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Video
 
-/**
- * Section displaying in-progress videos in a horizontal carousel.
- * Uses an adaptive section header that shortens to "Continue" on narrow screens.
- */
 @Composable
 fun ContinueSection(
     videos: List<Video>,

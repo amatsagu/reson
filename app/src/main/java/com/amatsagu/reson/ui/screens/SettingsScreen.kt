@@ -73,12 +73,6 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.Locale
 
-/**
- * Settings Screen with 3 dedicated sections:
- * 1. App details (Engine, SQLite schema, download stats, listening time, update & self-repair)
- * 2. Data control (Export, Import, Clear history, Delete all with confirmation dialogs)
- * 3. User preferences (Theme color picker, Recommendations toggle, Language selection)
- */
 @Composable
 fun SettingsScreen(
     ytDlpState: YtDlpState,
@@ -102,7 +96,6 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    // Dialog states
     var showSelfRepairDialog by remember { mutableStateOf(value = false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(value = false) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
@@ -115,7 +108,6 @@ fun SettingsScreen(
     val deleteSuccessMsg = stringResource(R.string.settings_delete_success)
     val historyClearedMsg = stringResource(R.string.settings_history_cleared)
 
-    // Export file picker launcher
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
@@ -141,7 +133,6 @@ fun SettingsScreen(
         }
     }
 
-    // Import file picker launcher
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -159,9 +150,6 @@ fun SettingsScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // =========================================================================
-        // 1. App Details Card
-        // =========================================================================
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -177,7 +165,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Engine version
                 val engineVersionText = when (ytDlpState) {
                     is YtDlpState.Ready -> ytDlpState.version
                     is YtDlpState.Updating -> stringResource(R.string.status_updating)
@@ -192,7 +179,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Cache / DB version
                 DetailRow(
                     label = stringResource(R.string.settings_cache_version),
                     value = "Reson Format 1.0"
@@ -200,7 +186,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Downloaded videos count
                 val downloadedCount = databaseStats?.downloadedVideoCount ?: 0L
                 DetailRow(
                     label = stringResource(R.string.settings_downloaded_count),
@@ -209,7 +194,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Cache size (sqlite data size + all downloaded locally files)
                 val totalCacheBytes = databaseStats?.totalCacheSizeBytes ?: 0L
                 DetailRow(
                     label = stringResource(R.string.settings_cache_size),
@@ -218,7 +202,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Total listening time
                 DetailRow(
                     label = stringResource(R.string.settings_total_listening_time),
                     value = formatListeningTime(totalListeningTimeMs)
@@ -228,7 +211,6 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Action buttons: Check update & Self-repair (both styled same as OutlinedButtons without icons)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -258,9 +240,6 @@ fun SettingsScreen(
             }
         }
 
-        // =========================================================================
-        // 2. Data Control Card
-        // =========================================================================
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -281,7 +260,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Export Button
                 OutlinedButton(
                     onClick = {
                         exportLauncher.launch("reson_backup_${System.currentTimeMillis()}.db")
@@ -300,7 +278,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Import Button
                 OutlinedButton(
                     onClick = {
                         importLauncher.launch(arrayOf("*/*"))
@@ -319,7 +296,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Clear History Button (No confirmation prompt needed)
                 OutlinedButton(
                     onClick = {
                         onClearHistory()
@@ -341,7 +317,6 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Delete All Data Button (Bright Material Danger Red)
                 val dangerRed = Color(0xFFE53935)
                 Button(
                     onClick = { showDeleteConfirmDialog = true },
@@ -369,9 +344,6 @@ fun SettingsScreen(
             }
         }
 
-        // =========================================================================
-        // 3. User Preferences Card
-        // =========================================================================
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -392,7 +364,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 3a. Theme Color Choice
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
@@ -414,7 +385,6 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // All 7 colors displayed across the card width without hidden horizontal scrolling
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -434,7 +404,6 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 3b. Show Recommended Content Toggle (clean single row without description)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -460,7 +429,6 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 3c. Language Choice
                 Text(
                     text = stringResource(R.string.settings_language),
                     fontSize = 14.sp,
@@ -508,11 +476,6 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(16.dp))
     }
 
-    // =========================================================================
-    // Confirmation Dialogs
-    // =========================================================================
-
-    // 1. Self-Repair Dialog
     if (showSelfRepairDialog) {
         AlertDialog(
             onDismissRequest = { showSelfRepairDialog = false },
@@ -551,7 +514,6 @@ fun SettingsScreen(
         )
     }
 
-    // 2. Import Database Dialog
     if (showImportConfirmDialog && (pendingImportUri != null)) {
         val uri = pendingImportUri!!
         AlertDialog(
@@ -618,7 +580,6 @@ fun SettingsScreen(
         )
     }
 
-    // 3. Delete All Data Confirmation Dialog
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },

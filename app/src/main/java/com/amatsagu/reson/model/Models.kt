@@ -4,9 +4,6 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
 import com.amatsagu.reson.R
 
-/**
- * Domain model representing a YouTube video item.
- */
 @Immutable
 data class Video(
     val id: String,
@@ -30,9 +27,6 @@ data class Video(
     val aspectRatio: Float = 0f,
 )
 
-/**
- * Representation of a creator / YouTube channel.
- */
 @Immutable
 data class Channel(
     val id: String,
@@ -48,9 +42,6 @@ data class Channel(
     val lastSyncAt: Long = 0L,
 )
 
-/**
- * Union type for heterogeneous search results (videos and followable creators).
- */
 @Immutable
 sealed interface SearchResultItem {
     val id: String
@@ -66,9 +57,6 @@ sealed interface SearchResultItem {
     }
 }
 
-/**
- * Bottom navigation destinations with localized string resource IDs.
- */
 enum class ResonTab(@StringRes val titleRes: Int) {
     Feed(R.string.tab_feed),
     Channels(R.string.tab_channels),

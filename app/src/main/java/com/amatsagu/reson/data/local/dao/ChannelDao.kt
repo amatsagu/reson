@@ -5,9 +5,6 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import com.amatsagu.reson.model.Channel
 
-/**
- * Data access operations for the channels table with pre-resolved cursor column indices.
- */
 class ChannelDao {
 
     fun upsertChannel(

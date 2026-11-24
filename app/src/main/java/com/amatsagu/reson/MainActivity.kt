@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { /* Permission result handled */ }
+    ) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -227,7 +227,6 @@ fun ResonApp(viewModel: MainViewModel) {
                     }
                 }
 
-                // Search Overlay placed inside Scaffold content area so unified bottom bar remains docked below
                 SearchOverlay(
                     visible = uiState.isSearchActive,
                     query = uiState.searchQuery,
@@ -255,7 +254,6 @@ fun ResonApp(viewModel: MainViewModel) {
             }
         }
 
-        // Startup App Loading Overlay with Bypass
         val loadingStatus = if (uiState.loadingStatusArg != null) {
             stringResource(uiState.loadingStatusRes, uiState.loadingStatusArg!!)
         } else {
@@ -305,7 +303,6 @@ fun FeedScreen(
             .fillMaxSize()
             .padding(contentPadding)
     ) {
-        // Search bar pill stays pinned at the top
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -335,14 +332,12 @@ fun FeedScreen(
         ) {
             if (!hasContent) {
                 if (!showRecommended && uiState.continueVideos.isEmpty()) {
-                    // Empty state when user disabled recommendations and has no continue listening items
                     RecommendationsDisabledFeedState(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(horizontal = 32.dp)
                     )
                 } else {
-                    // Friendly centered empty state encouraging user to search
                     EmptyFeedState(
                         onSearchClick = onSearchClick,
                         modifier = Modifier
@@ -448,10 +443,6 @@ fun FeedScreen(
     }
 }
 
-/**
- * Friendly empty state displayed when neither continue watching nor recommended items are present.
- * Encourages the user to start searching and discovering content.
- */
 @Composable
 fun EmptyFeedState(
     onSearchClick: () -> Unit,
@@ -501,10 +492,6 @@ fun EmptyFeedState(
     }
 }
 
-/**
- * Friendly empty state displayed when recommended content is disabled by user preference.
- * Matches the exact styling and proportions of [EmptyFeedState].
- */
 @Composable
 fun RecommendationsDisabledFeedState(
     modifier: Modifier = Modifier,
@@ -659,7 +646,6 @@ fun ChannelsScreen(
                 contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Top Horizontal Swipeable Channels Carousel
                 item(key = "channels_carousel") {
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
@@ -688,7 +674,6 @@ fun ChannelsScreen(
                     }
                 }
 
-                // Section Header for Videos
                 item(key = "recent_videos_header") {
                     val selectedChannel = followedChannels.find { it.id == selectedChannelId }
                     val (fullHeader, shortHeader) = if (selectedChannel != null) {
@@ -720,7 +705,6 @@ fun ChannelsScreen(
                     }
                 }
 
-                // Recent Uploads List (max 5 per channel when in "All" view)
                 if (videos.isEmpty()) {
                     item(key = "no_videos_placeholder") {
                         Box(

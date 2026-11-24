@@ -11,18 +11,11 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
-/**
- * Downloads and prepares channel avatars as compact Base64 strings for instant offline SQLite persistence.
- */
 object AvatarManager {
     private const val TAG = "Reson:Avatar"
-    private const val MAX_IMAGE_DIMEN = 160 // Optimal for ~48-56dp circular avatar
-    private const val MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024 // 5 MB safety bound
+    private const val MAX_IMAGE_DIMEN = 160
+    private const val MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024
 
-    /**
-     * Resolves the channel avatar image URL by inspecting the channel's public og:image meta tag.
-     * Supports both canonical channel IDs (UC...) and channel handles (@handle).
-     */
     suspend fun fetchChannelAvatarUrl(channelId: String, handle: String = ""): String? = withContext(ResonDispatchers.Network) {
         val cleanId = channelId.trim()
         val cleanHandle = handle.trim()
@@ -61,11 +54,6 @@ object AvatarManager {
         }
     }
 
-    /**
-     * Extracts the best square avatar image URL from a yt-dlp thumbnails JSONArray.
-     * Prioritizes uncropped square avatars (avatar_uncropped, or 1:1 aspect ratio),
-     * avoiding wide channel banners.
-     */
     fun extractAvatarUrlFromThumbnails(thumbs: org.json.JSONArray?): String? {
         if (thumbs == null || thumbs.length() == 0) return null
 
@@ -104,10 +92,6 @@ object AvatarManager {
         return finalUrl?.let { if (it.startsWith("//")) "https:$it" else it }
     }
 
-    /**
-     * Downloads an avatar from the given URL and converts it into a Base64 string.
-     * Automatically downscales images larger than 160px to preserve minimal SQLite storage.
-     */
     suspend fun downloadAvatarAsBase64(imageUrl: String): String? = withContext(ResonDispatchers.Network) {
         val trimmed = imageUrl.trim()
         if (trimmed.isEmpty()) return@withContext null
@@ -136,12 +120,10 @@ object AvatarManager {
             }
             if (rawBytes.isEmpty()) return@withContext null
 
-            // If byte array is already small (< 40KB), encode directly
             if (rawBytes.size < 40_000) {
                 return@withContext Base64.encodeToString(rawBytes, Base64.NO_WRAP)
             }
 
-            // Downscale large avatar to keep SQLite footprint ultra-lean
             val bitmap = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return@withContext null
             val scaled = if (bitmap.width > MAX_IMAGE_DIMEN || bitmap.height > MAX_IMAGE_DIMEN) {
                 val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()

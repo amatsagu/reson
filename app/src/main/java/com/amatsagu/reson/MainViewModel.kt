@@ -38,20 +38,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Complete UI State for Reson application with localized string resource references.
- */
 @Immutable
 data class MainUiState(
-    // App startup loading overlay
     val isAppLoading: Boolean = true,
     @StringRes val loadingStatusRes: Int = R.string.loading_starting_engine,
     val loadingStatusArg: String? = null,
 
-    // Navigation
     val selectedTab: ResonTab = ResonTab.Feed,
 
-    // Search state
     val searchQuery: String = "",
     val isSearchActive: Boolean = false,
     val suggestions: List<String> = emptyList(),
@@ -60,24 +54,20 @@ data class MainUiState(
     @StringRes val searchErrorRes: Int? = null,
     val searchErrorArg: String? = null,
 
-    // Channel subscriptions
     val followedChannels: Set<String> = emptySet(),
     val followedChannelList: List<Channel> = emptyList(),
-    val selectedChannelId: String? = null, // null = "All"
+    val selectedChannelId: String? = null,
     val channelVideos: List<Video> = emptyList(),
     val isSyncingChannels: Boolean = false,
 
-    // Feed / Home Content
     val continueVideos: List<Video> = emptyList(),
     val feedVideos: List<Video> = emptyList(),
     val lastFeedSyncedAt: Long = 0L,
     val lastChannelsSyncedAt: Long = 0L,
 
-    // Library Content
     val historyVideos: List<Video> = emptyList(),
     val downloadedVideos: List<Video> = emptyList(),
 
-    // Pagination & Infinite Scroll states
     val isFeedRefreshing: Boolean = false,
     val isFeedLoadingMore: Boolean = false,
     val canLoadMoreFeed: Boolean = true,
@@ -89,7 +79,6 @@ data class MainUiState(
     val isSearchLoadingMore: Boolean = false,
     val canLoadMoreSearch: Boolean = true,
 
-    // Bottom Audio Player State
     val currentPlayingVideo: Video? = null,
     val isPlaying: Boolean = false,
     val isAudioBuffering: Boolean = false,
@@ -97,7 +86,6 @@ data class MainUiState(
     val playbackDurationMs: Long = 0L,
     val playbackProgress: Float = 0f,
 
-    // Network & Rate-Limit Diagnostics Hints
     val isOffline: Boolean = false,
     val isRateLimitBlocked: Boolean = false,
     val rateLimitBlockedMessage: String? = null,
@@ -105,13 +93,9 @@ data class MainUiState(
     val playbackErrorMessage: String? = null,
     val isNetworkBannerDismissed: Boolean = false,
 
-    // In-memory download queue & progress state
     val queuedDownloadIds: Set<String> = emptySet(),
     val downloadingProgressMap: Map<String, Float> = emptyMap(),
 ) {
-    /**
-     * Reassuring inline player status hint for users during stalls, slow connections, or blocks.
-     */
     val playerStatusHint: String?
         get() = playbackErrorMessage
             ?: networkHintMessage
@@ -201,21 +185,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // Initial database stats load and clean missing offline files / purge shorts
         refreshDatabaseStats()
         viewModelScope.launch(ResonDispatchers.Database) {
             databaseManager.syncDownloadedState()
             databaseManager.deleteShortVideos()
         }
 
-        // Progress persistence single worker: consumes updates on bounded Database dispatcher
         viewModelScope.launch(ResonDispatchers.Database) {
             for (update in progressChannel) {
                 databaseManager.savePlaybackProgress(update.videoId, update.positionMs, update.durationMs, notify = false)
             }
         }
 
-        // Observe continuous network connectivity state (offline vs online)
         viewModelScope.launch {
             com.amatsagu.reson.core.network.NetworkMonitor.getInstance(application).networkState.collect { netState ->
                 val offline = !netState.isConnected || !netState.isValidated
@@ -223,7 +204,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe YouTube rate-limit & persistent blocking state
         viewModelScope.launch {
             ytDlpManager.rateLimitStatus.collect { status ->
                 when (status) {
@@ -259,7 +239,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe network connectivity transitions for smart logging and diagnostics
         viewModelScope.launch {
             com.amatsagu.reson.core.network.NetworkMonitor.getInstance(application).transitions.collect { transition ->
                 when (transition) {
@@ -279,7 +258,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe followed channels from SQLite
         viewModelScope.launch {
             databaseManager.observeFollowedChannels().collect { channels ->
                 _uiState.update { it.copy(followedChannelList = channels) }
@@ -287,7 +265,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe followed channel IDs from SQLite for fast lookup & sync search results
         viewModelScope.launch {
             databaseManager.observeFollowedChannelIds().collect { ids ->
                 _uiState.update { current ->
@@ -304,7 +281,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe feed videos (from followed channels), excluding any items in continue listening
         viewModelScope.launch {
             databaseManager.observeFeedVideos(limit = PAGE_SIZE).collect { videos ->
                 _uiState.update { current ->
@@ -317,12 +293,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Background check: replenish discovery pool with fresh collaborator/similar-creator content
         viewModelScope.launch {
             replenishDiscoveryFeedIfNeeded(force = false)
         }
 
-        // Observe uploads for the channels section (all followed channels within the last month)
         viewModelScope.launch {
             databaseManager.observeVideosFromFollowedWithinMonth(limit = PAGE_SIZE).collect { videos ->
                 _uiState.update { current ->
@@ -338,7 +312,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe continue listening items (in-progress videos) and ensure feed excludes them
         viewModelScope.launch {
             databaseManager.observeContinueListening().collect { continueVids ->
                 _uiState.update { current ->
@@ -353,7 +326,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe listening history and ensure feed excludes watched items
         viewModelScope.launch {
             databaseManager.observePlaybackHistory().collect { histVids ->
                 _uiState.update { current ->
@@ -368,14 +340,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Observe locally downloaded videos
         viewModelScope.launch {
             databaseManager.observeDownloadedVideos().collect { videos ->
                 _uiState.update { it.copy(downloadedVideos = videos) }
             }
         }
 
-        // Observe Audio Player playback state.
         // High-frequency position ticks are isolated to audioPlaybackState to maintain rock-solid 120 FPS
         // on the main screen and avoid unnecessary whole-screen recompositions during scrolling.
         viewModelScope.launch {
@@ -442,11 +412,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 loadingStatusArg = state.version
                             )
                         }
-                        // Auto-dismiss loading screen after a short moment when ready
                         delay(600)
                         _uiState.update { it.copy(isAppLoading = false) }
-
-                        // Background sync stale channels after engine is ready
                         syncFollowedChannels()
                     }
                     is YtDlpState.Error -> {
@@ -464,9 +431,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Bypasses the initial loading screen immediately (e.g. for offline use).
-     */
     fun bypassLoading() {
         addLog("User bypassed startup loading (continuing offline)")
         _uiState.update { it.copy(isAppLoading = false) }
@@ -494,9 +458,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Handles typing in search bar with debounced autocomplete suggestions.
-     */
     fun onSearchQueryChange(newQuery: String) {
         val queryChanged = newQuery != _uiState.value.searchQuery
         _uiState.update {
@@ -513,7 +474,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         suggestJob?.cancel()
         if (newQuery.trim().length >= 2) {
             suggestJob = viewModelScope.launch {
-                delay(250.milliseconds) // 250ms debounce
+                delay(250.milliseconds)
                 val suggestions = SearchSuggestClient.getSuggestions(newQuery)
                 _uiState.update { it.copy(suggestions = suggestions) }
             }
@@ -522,9 +483,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Executes YouTube fast search for top 30 videos.
-     */
     fun executeSearch(query: String) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return
@@ -546,7 +504,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         addLog("Executing unified search for: '$trimmed'...")
 
         searchJob = viewModelScope.launch(ResonDispatchers.Network) {
-            // Concurrently query related videos and relevant channels (up to 8 channels to prevent premature cutoff)
             val videoDeferred = async { ytDlpManager.searchContent(trimmed, maxResults = 30) }
             val channelDeferred = async { ytDlpManager.searchChannels(trimmed, maxResults = 8) }
 
@@ -558,7 +515,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val rawVideos = videoResult.data
                     val rawChannels = ((channelResult as? Result.Success)?.data ?: emptyList()).toMutableList()
 
-                    // Also harvest channel candidates directly from rawVideos if not already present in rawChannels
                     val existingChannelIds = rawChannels.map { it.id }.toMutableSet()
                     for (v in rawVideos) {
                         if (v.channelId.isNotBlank() && !existingChannelIds.contains(v.channelId) && v.channelTitle.isNotBlank()) {
@@ -700,9 +656,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Pull-to-refresh for Feed: forces fresh discovery sampling from rotating followed creator seeds.
-     */
     fun refreshFeed() {
         if (_uiState.value.isFeedRefreshing) return
         viewModelScope.launch {
@@ -728,11 +681,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Infinite scroll pagination: loads next page of feed videos using the anti-clustering 25%/75% mix.
-     * Automatically filters out any items currently present in continue listening or history lists.
-     * If the local recommended pool runs low, fetches the next batch of discovery videos from YouTube.
-     */
     fun loadMoreFeedVideos() {
         val state = _uiState.value
         if (state.isFeedLoadingMore || !state.canLoadMoreFeed || state.feedVideos.isEmpty() || feedPaginationJob?.isActive == true) return
@@ -746,7 +694,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             var nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentFeedIds.size, excludeIds = excludeIds)
 
-            // If local DB doesn't have enough videos to fill the requested page, replenish discovery from YouTube and re-query
             if (nextBatch.size < PAGE_SIZE) {
                 replenishDiscoveryFeedIfNeeded(force = true)
                 nextBatch = databaseManager.getFeedVideos(limit = PAGE_SIZE, offset = currentFeedIds.size, excludeIds = excludeIds)
@@ -766,9 +713,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Pseudo-infinite scroll pagination for continue listening horizontal carousel.
-     */
     fun loadMoreContinueVideos() {
         val state = _uiState.value
         if (state.isContinueLoadingMore || !state.canLoadMoreContinue || state.continueVideos.isEmpty() || (continuePaginationJob?.isActive == true)) return
@@ -794,11 +738,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Infinite scroll pagination: loads next page of channel uploads.
-     * - When viewing All Channels: loads next batch from DB cut off to 1 month.
-     * - When viewing a specific channel: loads from DB; if DB is exhausted, fetches next windowed slice from YouTube.
-     */
     fun loadMoreChannelVideos() {
         val state = _uiState.value
         if (state.isChannelLoadingMore || !state.canLoadMoreChannelVideos || state.channelVideos.isEmpty() || channelPaginationJob?.isActive == true) return
@@ -813,7 +752,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 var localBatch = databaseManager.getVideosForChannel(selectedId, limit = PAGE_SIZE, offset = currentOffset)
                 if (localBatch.isEmpty()) {
-                    // Fetch next page directly from YouTube via yt-dlp windowed pagination
                     val ch = _uiState.value.followedChannelList.find { it.id == selectedId }
                         ?: databaseManager.getFollowedChannels().find { it.id == selectedId }
                     val result = withContext(ResonDispatchers.Network) {
@@ -849,9 +787,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Infinite scroll pagination: loads next page of search results via yt-dlp.
-     */
     fun loadMoreSearchResults() {
         val state = _uiState.value
         if (state.isSearchLoadingMore || !state.canLoadMoreSearch || state.isSearching || state.searchQuery.isBlank() || searchPaginationJob?.isActive == true) return
@@ -938,11 +873,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var avatarSyncJob: Job? = null
 
-    /**
-     * Proactively verifies followed channels have offline Base64 avatars cached.
-     * Reuses known avatarUrl first, falling back to lightweight web scraping (og:image)
-     * and finally dedicated yt-dlp metadata extraction.
-     */
     private fun ensureFollowedChannelAvatars(channels: List<Channel>) {
         val missing = channels.filter { it.avatarBase64.isBlank() }
         if (missing.isEmpty() || avatarSyncJob?.isActive == true) return
@@ -951,7 +881,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             for (ch in missing) {
                 if (!isActive) break
 
-                // 1. If avatarUrl already exists, download directly (zero extra discovery calls)
                 if (ch.avatarUrl.isNotBlank()) {
                     val base64 = AvatarManager.downloadAvatarAsBase64(ch.avatarUrl)
                     if (!base64.isNullOrBlank()) {
@@ -960,7 +889,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // 2. Fallback: lightweight web request (og:image)
                 val webAvatarUrl = AvatarManager.fetchChannelAvatarUrl(ch.id, ch.handle)
                 if (!webAvatarUrl.isNullOrBlank()) {
                     val base64 = AvatarManager.downloadAvatarAsBase64(webAvatarUrl)
@@ -970,7 +898,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // 3. Fallback: dedicated yt-dlp extraction
                 val ytdlAvatarUrl = ytDlpManager.fetchChannelAvatarOnly(ch.id, ch.handle)
                 if (!ytdlAvatarUrl.isNullOrBlank()) {
                     val base64 = AvatarManager.downloadAvatarAsBase64(ytdlAvatarUrl)
@@ -982,15 +909,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Background task to download channel avatar as compact Base64 and fetch recent uploads.
-     * Reuses feed metadata to capture avatar without redundant requests, falling back to web/yt-dlp only if needed.
-     */
     private fun syncChannelInBackground(channel: Channel) {
         viewModelScope.launch {
             var hasAvatar = channel.avatarBase64.isNotBlank()
 
-            // 1. Download avatar as Base64 if not already cached and avatarUrl is known
             if (!hasAvatar && channel.avatarUrl.isNotBlank()) {
                 val base64 = AvatarManager.downloadAvatarAsBase64(channel.avatarUrl)
                 if (!base64.isNullOrBlank()) {
@@ -1000,8 +922,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // 2. Fetch latest videos for this channel via yt-dlp (up to 20 to capture recent uploads)
-            // Reuses channel feed metadata to capture avatar if still missing (zero extra network calls)
             val result = ytDlpManager.fetchChannelVideos(
                 channelId = channel.id,
                 handle = channel.handle,
@@ -1032,7 +952,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            // 3. Fallback: Only if avatar is STILL missing after video fetch, do extra web request / ytdl request
             if (!hasAvatar) {
                 val webUrl = AvatarManager.fetchChannelAvatarUrl(channel.id, channel.handle)
                 if (!webUrl.isNullOrBlank()) {
@@ -1057,13 +976,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Syncs followed channels:
-     * - Uses 15-minute smart cache TTL: skips network requests for any channel synced within 15 minutes unless [force] is true.
-     * - Uses fast lightweight YouTube Atom RSS feed (~150ms per channel) with graceful yt-dlp fallback.
-     * - Uses bounded concurrency (Semaphore of 3) to execute in parallel while strictly preventing rate limits.
-     * - Updates SQLite last_sync_at per channel and global sync timestamps.
-     */
     fun syncFollowedChannels(force: Boolean = false) {
         if (_uiState.value.isSyncingChannels) return
 
@@ -1072,7 +984,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (channels.isEmpty()) return@launch
 
             val now = System.currentTimeMillis()
-            val ttlMillis = 15 * 60 * 1000L // 15-minute smart cache TTL
+            val ttlMillis = 15 * 60 * 1000L
 
             val channelsToSync = if (force) {
                 channels
@@ -1088,15 +1000,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(isSyncingChannels = true) }
             addLog("Checking updates for ${channelsToSync.size} followed channels via yt-dlp...")
 
-            // Clean up any stale shorts or unplayed 0-duration videos before syncing
             databaseManager.deleteShortVideos()
 
             withContext(ResonDispatchers.Network) {
                 for (ch in channelsToSync) {
                     if (!isActive) break
 
-                    // Directly query YouTube's dedicated long-form /videos tab via yt-dlp to guarantee duration and exclude shorts.
-                    // Reuses feed metadata to capture channel avatar if not already cached.
                     val ytResult = ytDlpManager.fetchChannelVideos(
                         channelId = ch.id,
                         handle = ch.handle,
@@ -1119,7 +1028,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     databaseManager.updateChannelLastSyncTime(ch.id, System.currentTimeMillis())
 
-                    // Fallback only if avatar is still missing after video fetch
                     if (ch.avatarBase64.isBlank()) {
                         val currentCh = databaseManager.getFollowedChannels().find { it.id == ch.id }
                         if (currentCh == null || currentCh.avatarBase64.isBlank()) {
@@ -1195,23 +1103,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val topicFromSeed1 = seed1Videos.firstNotNullOfOrNull { video -> DynamicTopicExtractor.extractSearchQuery(video, seed1) }
         val topicFromSeed2 = seed2Videos.firstNotNullOfOrNull { video -> DynamicTopicExtractor.extractSearchQuery(video, seed2) }
 
-        // 2. Build focused search queries dynamically
         val query1: String
         val query2: String
 
         when (currentVariant % 3) {
             0 -> {
-                // Focus on current video topics from history or followed uploads
                 query1 = topicFromHistory ?: topicFromSeed1 ?: "\"${seed1.title}\""
                 query2 = topicFromSeed2 ?: topicFromSeed1 ?: "\"${seed2.title}\""
             }
             1 -> {
-                // Mix between a dynamic topic and an exact creator collaboration/interview
                 query1 = topicFromSeed1 ?: topicFromHistory ?: "\"${seed1.title}\""
                 query2 = if (seed2.title.isNotBlank()) "\"${seed2.title}\" interview" else "\"${seed1.title}\""
             }
             else -> {
-                // Mix between a creator appearance and a second creator topic
                 query1 = if (seed1.title.isNotBlank()) "\"${seed1.title}\" guest" else "\"${seed2.title}\""
                 query2 = topicFromSeed2 ?: topicFromHistory ?: "\"${seed2.title}\""
             }
@@ -1269,11 +1173,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Pull-to-refresh for the Channels section:
-     * - In "All Channels" view: syncs all followed channels and caches new uploads.
-     * - In specific channel view: fetches the latest uploads for that specific channel from YouTube.
-     */
     fun refreshChannelsSection() {
         val selectedId = _uiState.value.selectedChannelId
         if (selectedId == null) {
@@ -1344,7 +1243,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         playJob?.cancel()
         playWatchdogJob?.cancel()
 
-        // 1. Check if video has a local downloaded file on disk -> PRIORITIZE INSTANT LOCAL PLAYBACK
         val localFile = databaseManager.getDownloadedFile(video.id)
         if (localFile != null && localFile.exists() && localFile.length() > 0) {
             addLog("Prioritizing local offline audio for: ${video.title} (${localFile.length() / 1024} KB)")
@@ -1377,7 +1275,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 2. Otherwise proceed with online streaming extraction
         val isOffline = !com.amatsagu.reson.core.network.NetworkMonitor.getInstance(getApplication()).isOnline()
         val initialHint = if (isOffline) "No internet connection. Waiting for network…" else null
 
@@ -1394,7 +1291,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // 20-second watchdog: if stream extraction or audio startup takes >20s, reassure user
         playWatchdogJob = viewModelScope.launch {
             delay(20.seconds)
             if (_uiState.value.isAudioBuffering && _uiState.value.currentPlayingVideo?.id == video.id && !_uiState.value.isPlaying) {
@@ -1519,7 +1415,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun downloadVideo(video: Video) {
         val videoId = video.id
 
-        // 1. If currently downloading, cancel it and trigger next in queue
         if (activeDownloadVideo?.id == videoId) {
             addLog("Cancelling active download: ${video.title}")
             activeDownloadJob?.cancel()
@@ -1534,7 +1429,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 2. If waiting in the in-memory queue, remove it immediately
         synchronized(downloadQueueList) {
             val removed = downloadQueueList.removeAll { it.id == videoId }
             if (removed) {
@@ -1547,13 +1441,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Debounce spam clicks / concurrent operations on the same video
         if (activeVideoOperations.contains(videoId)) return
 
-        // 3. If already downloaded, delete the offline file from disk and update DB
         if (video.isDownloaded || databaseManager.getDownloadedFile(videoId) != null) {
             activeVideoOperations.add(videoId)
-            // Immediately update in-memory state across all lists for 0ms visual latency
             _uiState.update { current ->
                 current.copy(
                     downloadedVideos = current.downloadedVideos.filter { it.id != videoId },
@@ -1583,7 +1474,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        // 4. Otherwise enqueue or start download immediately
         activeVideoOperations.add(videoId)
         synchronized(downloadQueueList) {
             if (activeDownloadVideo == null) {
@@ -1605,7 +1495,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val videoId = video.id
         activeDownloadVideo = video
         activeVideoOperations.add(videoId)
-        // Immediately give clear feedback: 0.01f progress
         _uiState.update {
             it.copy(
                 queuedDownloadIds = it.queuedDownloadIds - videoId,
@@ -1628,7 +1517,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         // ONLY commit to SQLite upon complete, verified disk write
                         databaseManager.upsertVideo(updatedVideo)
                         databaseManager.updateDownloadStatus(videoId, isDownloaded = true, filePath = file.absolutePath)
-                        // Optimistically update in-memory lists so trash icon immediately appears everywhere
                         _uiState.update { current ->
                             val existsInDownloaded = current.downloadedVideos.any { it.id == videoId }
                             val newDownloadedList = if (existsInDownloaded) {

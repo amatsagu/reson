@@ -19,9 +19,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-/**
- * High-level classification of network transports.
- */
 enum class NetworkType {
     WIFI,
     CELLULAR_5G,
@@ -33,9 +30,6 @@ enum class NetworkType {
     NONE
 }
 
-/**
- * Snapshot of the device's default network connectivity.
- */
 data class NetworkState(
     val isConnected: Boolean = false,
     val isValidated: Boolean = false,
@@ -44,20 +38,12 @@ data class NetworkState(
     val displayName: String = "Offline",
 )
 
-/**
- * Transitions emitted when the underlying network route or connection changes.
- */
 sealed interface NetworkTransition {
     data class Lost(val lastState: NetworkState) : NetworkTransition
     data class Switched(val from: NetworkState, val to: NetworkState) : NetworkTransition
     data class Restored(val to: NetworkState) : NetworkTransition
 }
 
-/**
- * Central monitor for network changes, handoffs (Wi-Fi <-> 5G/4G/3G, Wi-Fi roaming),
- * and disconnections. Provides debounced reactive transitions for seamless audio
- * stream recovery and smart request queue scheduling.
- */
 class NetworkMonitor private constructor(context: Context) {
 
     private val connectivityManager =
@@ -188,13 +174,13 @@ class NetworkMonitor private constructor(context: Context) {
         val caps = capabilities ?: connectivityManager.getNetworkCapabilities(network) ?: return
         val newState = resolveState(network, caps)
 
-        // Only transition once the network is actually validated (avoids half-connected captive portal states)
+        // Require NET_CAPABILITY_VALIDATED to avoid captive portals and half-connected routes
         if (!newState.isConnected || !newState.isValidated) {
             _networkState.value = newState
             return
         }
 
-        // Debounce transitions by 650ms to let DHCP, DNS and routing tables stabilize on tower/Wi-Fi handoff
+        // Debounce transitions by 650ms to let routing tables stabilize on cell/Wi-Fi handoff
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(650.milliseconds)
@@ -218,7 +204,7 @@ class NetworkMonitor private constructor(context: Context) {
     private fun handleNetworkLost() {
         debounceJob?.cancel()
         debounceJob = scope.launch {
-            // Short grace delay (250ms) to see if an immediate handoff to cellular occurs before announcing total loss
+            // Grace period to check whether a cellular fallback connects immediately
             delay(250.milliseconds)
             val currentActive = connectivityManager.activeNetwork
             val currentCaps = currentActive?.let { connectivityManager.getNetworkCapabilities(it) }
@@ -240,9 +226,6 @@ class NetworkMonitor private constructor(context: Context) {
         }
     }
 
-    /**
-     * Synchronous check if the device currently has a validated internet connection.
-     */
     fun isOnline(): Boolean {
         val state = _networkState.value
         return state.isConnected && state.isValidated

@@ -13,9 +13,6 @@ import com.amatsagu.reson.Result as ResonResult
 import com.yausername.youtubedl_android.YoutubeDL.UpdateChannel
 import java.util.concurrent.TimeUnit
 
-/**
- * Background worker to keep yt-dlp updated silently when the device is connected to a network.
- */
 class YtDlpUpdateWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -25,10 +22,8 @@ class YtDlpUpdateWorker(
         Log.i(TAG, "YtDlpUpdateWorker triggered in background")
         val manager = YtDlpManager.getInstance(applicationContext)
 
-        // Ensure initialized
         manager.initialize()
 
-        // Check for updates
         return when (val updateResult = manager.update(UpdateChannel.STABLE)) {
             is ResonResult.Success -> {
                 Log.i(TAG, "Background update succeeded: ${updateResult.data}")
@@ -49,10 +44,6 @@ class YtDlpUpdateWorker(
         private const val TAG = "Reson:UpdateWorker"
         private const val WORK_NAME = "reson_ytdlp_periodic_update"
 
-        /**
-         * Schedules a periodic background update check.
-         * Runs approximately once every 24 hours when connected to network.
-         */
         fun enqueuePeriodicUpdate(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)

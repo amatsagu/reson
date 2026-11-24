@@ -2,7 +2,6 @@ package com.amatsagu.reson.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Reson Dark Forest Green Palette (matching design screenshot)
 val ResonBackground = Color(0xFF0E1410)
 val ResonSurface = Color(0xFF131A15)
 val ResonCardSurface = Color(0xFF19221C)

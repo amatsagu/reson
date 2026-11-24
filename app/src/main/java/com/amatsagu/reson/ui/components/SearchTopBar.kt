@@ -72,9 +72,6 @@ import com.amatsagu.reson.model.SearchResultItem
 import com.amatsagu.reson.model.Video
 import kotlinx.coroutines.delay
 
-/**
- * Pill-shaped Search Bar with dynamic theming.
- */
 @Composable
 fun SearchPillBar(
     query: String,
@@ -118,11 +115,6 @@ fun SearchPillBar(
     }
 }
 
-/**
- * Fullscreen Interactive Search Overlay with unified pill style.
- * Back arrow and search button are integrated inside the search bar pill.
- * Automatically requests focus and opens the keyboard upon opening.
- */
 @Composable
 fun SearchOverlay(
     visible: Boolean,
@@ -161,7 +153,6 @@ fun SearchOverlay(
         )
     }
 
-    // Keep textFieldValue in sync whenever external query changes (e.g. suggestion tapped, cleared, etc.)
     LaunchedEffect(query) {
         if (query != textFieldValue.text) {
             textFieldValue = TextFieldValue(
@@ -171,7 +162,6 @@ fun SearchOverlay(
         }
     }
 
-    // Detect when scrolling near the end to trigger infinite scroll load-more
     val shouldLoadMore = remember {
         derivedStateOf {
             val total = listState.layoutInfo.totalItemsCount
@@ -186,7 +176,6 @@ fun SearchOverlay(
         }
     }
 
-    // Instantly request focus and show keyboard when overlay becomes visible
     LaunchedEffect(visible) {
         if (visible) {
             textFieldValue = TextFieldValue(
@@ -210,8 +199,6 @@ fun SearchOverlay(
                 .background(MaterialTheme.colorScheme.background)
                 .statusBarsPadding()
         ) {
-            // Unified Pill Search Bar (Back button, text field, clear, and search icon inside the pill)
-            // Perfectly aligned to the exact same size, position, and padding as SearchPillBar on FeedScreen
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -223,7 +210,6 @@ fun SearchOverlay(
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Back arrow INSIDE search bar pill (identical size and alignment to the search icon in SearchPillBar)
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.action_back),
@@ -241,7 +227,6 @@ fun SearchOverlay(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Text field inside the pill (starts at exact same 50dp offset as SearchPillBar)
                 BasicTextField(
                     value = textFieldValue,
                     onValueChange = { newValue ->
@@ -289,7 +274,6 @@ fun SearchOverlay(
                     }
                 )
 
-                // When text is typed, replace the search icon with the 'X' close/clear icon
                 if (textFieldValue.text.isNotEmpty()) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -323,7 +307,6 @@ fun SearchOverlay(
                 }
             }
 
-            // Body: Loading, Suggestions, or Results
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -368,7 +351,6 @@ fun SearchOverlay(
                         }
                     }
 
-                    // Autocomplete suggestions list while typing (prioritized over results so typing immediately shows suggestions)
                     suggestions.isNotEmpty() -> {
                         LazyColumn(
                             contentPadding = PaddingValues(
@@ -433,7 +415,6 @@ fun SearchOverlay(
                         }
                     }
 
-                    // If we have search results
                     searchResults.isNotEmpty() -> {
                         LazyColumn(
                             state = listState,

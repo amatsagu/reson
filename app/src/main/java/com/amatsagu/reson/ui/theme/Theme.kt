@@ -145,10 +145,6 @@ private val ResonLightColorScheme = lightColorScheme(
     onPrimaryContainer = ResonBackground
 )
 
-/**
- * Reson Theme supporting Android Material You dynamic wallpaper colors
- * or user-selected Material palette accent and surface colors.
- */
 @Composable
 fun ResonTheme(
     themeColor: ThemeColor = ThemeColor.System,

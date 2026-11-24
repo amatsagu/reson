@@ -55,11 +55,6 @@ import com.amatsagu.reson.R
 private val CottonCandyPink = Color(0xFFF472B6)
 private val SkyCyan = Color(0xFF38BDF8)
 
-/**
- * Startup loading overlay for initializing yt-dlp and checking engine updates.
- * Features an animated Cotton Candy Puffy Bubble logo with ambient glow and breathing motion.
- * Provides a prominent bypass button to continue offline immediately.
- */
 @Composable
 fun AppLoadingOverlay(
     visible: Boolean,
@@ -74,7 +69,6 @@ fun AppLoadingOverlay(
     ) {
         val infiniteTransition = rememberInfiniteTransition(label = "StartupLogoAnimation")
 
-        // Gentle floating vertical offset
         val floatOffsetY by infiniteTransition.animateFloat(
             initialValue = -5f,
             targetValue = 5f,
@@ -85,7 +79,6 @@ fun AppLoadingOverlay(
             label = "FloatOffset"
         )
 
-        // Subtle breathing scale pulse
         val pulseScale by infiniteTransition.animateFloat(
             initialValue = 0.97f,
             targetValue = 1.03f,
@@ -96,7 +89,6 @@ fun AppLoadingOverlay(
             label = "PulseScale"
         )
 
-        // Soft halo glow intensity breathing
         val glowAlpha by infiniteTransition.animateFloat(
             initialValue = 0.35f,
             targetValue = 0.85f,
@@ -107,7 +99,6 @@ fun AppLoadingOverlay(
             label = "GlowAlpha"
         )
 
-        // Smooth rotation for the ambient gradient ring
         val ringRotation by infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
@@ -131,7 +122,6 @@ fun AppLoadingOverlay(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Interactive Animated Logo Showcase
                 Box(
                     modifier = Modifier
                         .size(180.dp)
@@ -139,7 +129,6 @@ fun AppLoadingOverlay(
                         .scale(pulseScale),
                     contentAlignment = Alignment.Center
                 ) {
-                    // 1. Ambient Radial Glow Aura
                     Box(
                         modifier = Modifier
                             .size(170.dp)
@@ -155,7 +144,6 @@ fun AppLoadingOverlay(
                             )
                     )
 
-                    // 2. Rotating Decorative Accent Ring
                     Box(
                         modifier = Modifier
                             .size(142.dp)
@@ -174,7 +162,6 @@ fun AppLoadingOverlay(
                             )
                     )
 
-                    // 3. Central Rounded Badge
                     Surface(
                         modifier = Modifier.size(126.dp),
                         shape = RoundedCornerShape(32.dp),
@@ -205,7 +192,6 @@ fun AppLoadingOverlay(
 
                 Spacer(modifier = Modifier.height(28.dp))
 
-                // App Brand Name with Cotton Candy gradient accent
                 Text(
                     text = stringResource(R.string.app_name),
                     fontSize = 32.sp,
@@ -216,7 +202,6 @@ fun AppLoadingOverlay(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Status feedback (pure text with subtle indicator, no button background/border)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
@@ -237,7 +222,6 @@ fun AppLoadingOverlay(
 
                 Spacer(modifier = Modifier.height(44.dp))
 
-                // Bypass / Continue offline button
                 OutlinedButton(
                     onClick = onBypass,
                     shape = RoundedCornerShape(24.dp),

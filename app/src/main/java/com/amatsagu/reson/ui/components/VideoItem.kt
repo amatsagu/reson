@@ -39,10 +39,6 @@ import com.amatsagu.reson.model.Video
 private val VideoThumbnailShape = RoundedCornerShape(12.dp)
 private val DualActionCapsuleShape = RoundedCornerShape(22.dp)
 
-/**
- * Row representing a YouTube video with 16:9 thumbnail, metadata, and play/download actions.
- * Optimized with static shapes, direct string formatting, and fixed dimensions for 120fps scrolling.
- */
 @Composable
 fun VideoItem(
     video: Video,

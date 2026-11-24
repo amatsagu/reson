@@ -7,10 +7,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
-/**
- * MediaSessionService providing Android System Media Notification, Lock Screen controls,
- * Bluetooth headset gesture integration, and persistent foreground background audio playback.
- */
 class ResonPlaybackService : MediaSessionService() {
 
     private var sessionAdded = false

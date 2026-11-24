@@ -39,10 +39,6 @@ import com.amatsagu.reson.model.Channel
 private val ChannelCardShape = RoundedCornerShape(16.dp)
 private val ChannelButtonShape = RoundedCornerShape(20.dp)
 
-/**
- * Row representing a followable YouTube channel / creator in search results.
- * Shows channel name, circular logo, subscriber count, and Follow/Following toggle button.
- */
 @Composable
 fun ChannelItem(
     channel: Channel,
@@ -138,7 +134,6 @@ fun ChannelItem(
 
         Spacer(modifier = Modifier.width(10.dp))
 
-        // Follow / Unfollow button
         if (channel.isFollowed) {
             Button(
                 onClick = onFollowClick,

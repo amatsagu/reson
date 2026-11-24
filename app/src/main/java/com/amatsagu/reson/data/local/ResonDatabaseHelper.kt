@@ -5,9 +5,6 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
 
-/**
- * SQLite open helper managing creation, indexing, migrations, PRAGMAs, and WAL mode for Reson.
- */
 class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     context,
     DATABASE_NAME,
@@ -24,20 +21,16 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
         try {
-            // High-performance WAL mode tuning:
-            // 1. NORMAL synchronous mode is 100% crash-safe in WAL and eliminates fsync stalls
+            // NORMAL synchronous mode is crash-safe in WAL mode and eliminates fsync latency
             db.execSQL("PRAGMA synchronous = NORMAL")
-            // 2. Keep temporary tables and sorts in RAM
             db.execSQL("PRAGMA temp_store = MEMORY")
-            // 3. 4 MB in-memory SQLite cache (-4000 KiB)
+            // Negative cache_size specifies memory in KiB (-4000 = ~4 MB RAM cache)
             db.execSQL("PRAGMA cache_size = -4000")
-            // Ensure schema migration columns exist
+
             try {
                 db.execSQL("ALTER TABLE videos ADD COLUMN aspect_ratio REAL NOT NULL DEFAULT 0.0")
             } catch (_: Exception) {
-                // Column already exists
             }
-            // Ensure all composite indexes exist
             createIndexes(db)
         } catch (e: Exception) {
             Log.w(TAG, "Error applying SQLite pragmas on open: ${e.message}")
@@ -47,7 +40,6 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     override fun onCreate(db: SQLiteDatabase) {
         Log.i(TAG, "Creating Reson SQLite database schema (v$DATABASE_VERSION)...")
 
-        // 1. Followed creators / channels table
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS channels (
@@ -65,7 +57,6 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
             """.trimIndent(),
         )
 
-        // 2. Videos / episodes table (with playback state, downloads, and channel relationship)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS videos (
@@ -91,7 +82,6 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
             """.trimIndent()
         )
 
-        // 3. Search history table
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS search_history (
@@ -107,33 +97,19 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
     }
 
     private fun createIndexes(db: SQLiteDatabase) {
-        // Performance Indexes: composite indexes matching exact WHERE + ORDER BY queries
-        // 1. Followed channels
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_channels_followed ON channels(is_followed, followed_at DESC)")
-
-        // 2. Channel videos & joins (covers getVideosForChannel, partitions, joins)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_channel_release ON videos(channel_id, release_timestamp DESC, created_at DESC)")
-
-        // 3. Global release ordering for Feed & within-month queries
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_release_created ON videos(release_timestamp DESC, created_at DESC)")
-
-        // 4. Discovery feed ordering (newest discovered first)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_created_release ON videos(created_at DESC, release_timestamp DESC)")
-
-        // 5. Downloads screen with playback state order
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_downloaded_ordered ON videos(is_downloaded, last_played_at DESC, created_at DESC)")
-
-        // 6. Playback history & continue listening
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_videos_last_played ON videos(last_played_at DESC)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        Log.i(TAG, "Upgrading database from $oldVersion to $newVersion...")
         createIndexes(db)
     }
 
     override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        Log.i(TAG, "Downgrading database from $oldVersion to $newVersion...")
         createIndexes(db)
     }
 

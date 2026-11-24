@@ -20,9 +20,6 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 
-/**
- * Statistics snapshot of the SQLite database.
- */
 data class DatabaseStats(
     val followedChannelCount: Long,
     val totalVideoCount: Long,
@@ -32,10 +29,6 @@ data class DatabaseStats(
     val totalCacheSizeBytes: Long = databaseSizeBytes,
 )
 
-/**
- * Central thread-safe Database Manager for Reson.
- * Designed similarly to YtDlpManager with clean suspend APIs and reactive Kotlin Flows.
- */
 class DatabaseManager private constructor(private val appContext: Context) {
 
     private var dbHelper = ResonDatabaseHelper(appContext)
@@ -44,7 +37,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
     private val mutex = Mutex()
     private val dispatcher = ResonDispatchers.Database
 
-    // Invalidation triggers to notify reactive Flows when data mutations occur
     private val channelInvalidationTrigger = MutableSharedFlow<Unit>(replay = 1).apply {
         tryEmit(Unit)
     }
@@ -52,14 +44,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         tryEmit(Unit)
     }
 
-    /* -------------------------------------------------------------------------
-     * Channels / Creators API
-     * ------------------------------------------------------------------------- */
-
-    /**
-     * Follows a channel, inserting or updating its record with is_followed = 1.
-     * Automatically notifies active observers.
-     */
     suspend fun followChannel(channel: Channel): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -70,9 +54,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         notifyVideoChanged()
     }
 
-    /**
-     * Unfollows a channel (sets is_followed = 0).
-     */
     suspend fun unfollowChannel(channelId: String): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -87,25 +68,16 @@ class DatabaseManager private constructor(private val appContext: Context) {
         success
     }
 
-    /**
-     * Returns a snapshot of all currently followed channels sorted by follow time.
-     */
     suspend fun getFollowedChannels(limit: Int = 500, offset: Int = 0): List<Channel> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         channelDao.getFollowedChannels(db, limit, offset)
     }
 
-    /**
-     * Returns a Set of followed channel IDs for fast O(1) membership checks.
-     */
     suspend fun getFollowedChannelIds(): Set<String> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         channelDao.getFollowedChannelIds(db)
     }
 
-    /**
-     * Updates stored base64 image data for an offline cached channel avatar.
-     */
     suspend fun updateChannelAvatarBase64(channelId: String, avatarBase64: String): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -119,9 +91,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         success
     }
 
-    /**
-     * Updates both avatar URL and base64 for a channel and notifies observers.
-     */
     suspend fun updateChannelAvatarUrlAndBase64(channelId: String, avatarUrl: String, avatarBase64: String): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -135,27 +104,18 @@ class DatabaseManager private constructor(private val appContext: Context) {
         success
     }
 
-    /**
-     * Reactive Flow observing followed channels. Re-emits automatically on mutation.
-     */
     fun observeFollowedChannels(): Flow<List<Channel>> = flow {
         channelInvalidationTrigger.collect {
             emit(getFollowedChannels())
         }
     }.flowOn(dispatcher)
 
-    /**
-     * Reactive Flow observing followed channel IDs set.
-     */
     fun observeFollowedChannelIds(): Flow<Set<String>> = flow {
         channelInvalidationTrigger.collect {
             emit(getFollowedChannelIds())
         }
     }.flowOn(dispatcher)
 
-    /**
-     * Updates the last sync timestamp for a channel.
-     */
     suspend fun updateChannelLastSyncTime(channelId: String, timestamp: Long = System.currentTimeMillis()): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -163,14 +123,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
     }
 
-    /* -------------------------------------------------------------------------
-     * Videos / Feed API
-     * ------------------------------------------------------------------------- */
-
-    /**
-     * Bulk inserts or updates videos in a single high-performance SQLite transaction.
-     * Silently ignores any locked/supporters-only videos and shorts.
-     */
     suspend fun upsertVideos(videos: List<Video>, defaultChannelId: String = ""): Unit = withContext(dispatcher) {
         val validVideos = videos.filterNot { 
             com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(it.title) ||
@@ -185,10 +137,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         notifyVideoChanged()
     }
 
-    /**
-     * Inserts or updates a single video.
-     * Silently ignores any locked/supporters-only video or short.
-     */
     suspend fun upsertVideo(video: Video, channelId: String = ""): Unit = withContext(dispatcher) {
         if (com.amatsagu.reson.YtDlpManager.isLockedVideoTitle(video.title) ||
             com.amatsagu.reson.YtDlpManager.isShortVideo(video)) return@withContext
@@ -199,26 +147,11 @@ class DatabaseManager private constructor(private val appContext: Context) {
         notifyVideoChanged()
     }
 
-    /**
-     * Gets recent videos from all followed channels with pagination support.
-     * Uses balanced distribution across followed channels (up to 5 recent uploads per channel)
-     * to prevent high-frequency uploaders from starving the feed.
-     */
-    /**
-     * Gets unwatched recommended discovery videos from non-followed channels.
-     */
     suspend fun getRecommendedDiscoveryVideos(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getRecommendedDiscoveryVideos(db, limit, offset)
     }
 
-    /**
-     * Fetches feed videos using the anti-clustering 25% followed unwatched / 75% recommended discovery mix.
-     * Guaranteed:
-     * - Zero duplicates
-     * - Zero watched/in-progress videos
-     * - Dispersed creators to prevent clustering
-     */
     suspend fun getFeedVideos(
         limit: Int = 30,
         offset: Int = 0,
@@ -249,34 +182,23 @@ class DatabaseManager private constructor(private val appContext: Context) {
         if (mixed.isNotEmpty()) {
             mixed
         } else if (offset == 0) {
-            // Fallback for fresh installs where no discovery videos have been fetched yet:
             videoDao.getFeedVideos(db, limit, offset).filterNot { it.id in excludeIds }
         } else {
             emptyList()
         }
     }
 
-    /**
-     * Reactive Flow of mixed feed videos (initial page).
-     */
     fun observeFeedVideos(limit: Int = 30): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
             emit(getFeedVideos(limit, offset = 0))
         }
     }.flowOn(dispatcher)
 
-    /**
-     * Gets videos for a specific channel with pagination support.
-     */
     suspend fun getVideosForChannel(channelId: String, limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getVideosForChannel(db, channelId, limit, offset)
     }
 
-    /**
-     * Gets all videos from followed channels released within the last 1 month (cutoff: 30 days ago),
-     * ordered by release date/time DESC with pagination support.
-     */
     suspend fun getVideosFromFollowedWithinMonth(limit: Int = 30, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val nowMs = System.currentTimeMillis()
         val oneMonthAgoSec = (nowMs / 1000L) - (30L * 24L * 3600L)
@@ -291,22 +213,12 @@ class DatabaseManager private constructor(private val appContext: Context) {
         )
     }
 
-    /**
-     * Reactive Flow observing all videos from all followed channels within the last 1 month.
-     */
     fun observeVideosFromFollowedWithinMonth(limit: Int = 30): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
             emit(getVideosFromFollowedWithinMonth(limit, offset = 0))
         }
     }.flowOn(dispatcher)
 
-    /* -------------------------------------------------------------------------
-     * Playback & Continue Listening API
-     * ------------------------------------------------------------------------- */
-
-    /**
-     * Updates playback progress for a video, recording lastPlayedAt timestamp.
-     */
     suspend fun savePlaybackProgress(
         videoId: String,
         positionMs: Long,
@@ -323,30 +235,17 @@ class DatabaseManager private constructor(private val appContext: Context) {
         success
     }
 
-    /**
-     * Fetches in-progress videos (< 98% complete) for the Continue section with pagination support.
-     */
     suspend fun getContinueListeningVideos(limit: Int = 10, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getContinueListeningVideos(db, limit, offset)
     }
 
-    /**
-     * Reactive Flow observing in-progress continue listening videos.
-     */
     fun observeContinueListening(limit: Int = 10): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
             emit(getContinueListeningVideos(limit, offset = 0))
         }
     }.flowOn(dispatcher)
 
-    /* -------------------------------------------------------------------------
-     * Downloads API
-     * ------------------------------------------------------------------------- */
-
-    /**
-     * Finds the real downloaded audio file on disk for the given videoId, if present and non-empty.
-     */
     fun getDownloadedFile(videoId: String): File? {
         val db = dbHelper.readableDatabase
         val dbVideo = videoDao.getVideoById(db, videoId)
@@ -374,10 +273,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         return null
     }
 
-    /**
-     * Deletes the local offline file and resets SQLite download state.
-     * Thoroughly removes any completed audio files as well as partial download fragments.
-     */
     suspend fun deleteDownloadedFile(videoId: String): Boolean = withContext(dispatcher) {
         var fileDeleted = false
         val downloadsDir = File(appContext.filesDir, "downloads")
@@ -400,15 +295,8 @@ class DatabaseManager private constructor(private val appContext: Context) {
         fileDeleted || dbSuccess
     }
 
-    /**
-     * Scans SQLite downloaded records and disk files for complete bidirectional consistency:
-     * 1. Cleans up any unfinished / interrupted download files (*.download, *.part, *.ytdl)
-     * 2. Clears SQLite ghost records whose local files are missing on disk
-     * 3. Deletes orphaned completed files on disk that have no committed DB record
-     */
     suspend fun syncDownloadedState(): Unit = withContext(dispatcher) {
         val downloadsDir = File(appContext.filesDir, "downloads")
-        // 1. Clean up temporary files left behind by app kills or crashes
         if (downloadsDir.exists()) {
             downloadsDir.listFiles { _, name ->
                 name.endsWith(".download") || name.endsWith(".part") || name.endsWith(".ytdl")
@@ -420,7 +308,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         val validDownloadedIds = mutableSetOf<String>()
         var changed = false
 
-        // 2. Verify all DB records against physical files
         for (v in downloaded) {
             val file = getDownloadedFile(v.id)
             if (file == null || !file.exists() || file.length() == 0L) {
@@ -431,7 +318,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
             }
         }
 
-        // 3. Remove uncommitted orphan files from disk
         if (downloadsDir.exists()) {
             downloadsDir.listFiles { _, name ->
                 !name.endsWith(".download") && !name.endsWith(".part") && !name.endsWith(".ytdl")
@@ -447,13 +333,9 @@ class DatabaseManager private constructor(private val appContext: Context) {
         if (changed) {
             notifyVideoChanged()
         }
-        // Keep SQLite lean and performant by safely pruning excess unplayed discovery items
         videoDao.pruneOldDiscoveryVideos(db, 600)
     }
 
-    /**
-     * Safely bounds unplayed discovery videos (channels not followed) to keep SQLite database lean.
-     */
     suspend fun pruneOldDiscoveryVideos(maxDiscoveryCount: Int = 600): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -461,9 +343,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
     }
 
-    /**
-     * Clears unplayed discovery videos (channels not followed) to refresh the discovery pool.
-     */
     suspend fun clearUnplayedDiscoveryVideos(): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -472,9 +351,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         notifyVideoChanged()
     }
 
-    /**
-     * Purges all YouTube Shorts and unplayed zero-duration videos from SQLite storage.
-     */
     suspend fun deleteShortVideos(): Int = withContext(dispatcher) {
         val deleted = mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -487,9 +363,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         deleted
     }
 
-    /**
-     * Updates download status and stored file path.
-     */
     suspend fun updateDownloadStatus(
         videoId: String,
         isDownloaded: Boolean,
@@ -505,47 +378,28 @@ class DatabaseManager private constructor(private val appContext: Context) {
         success
     }
 
-    /**
-     * Gets all downloaded videos.
-     */
     suspend fun getDownloadedVideos(limit: Int = 100, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getDownloadedVideos(db, limit, offset)
     }
 
-    /**
-     * Reactive Flow observing downloaded videos.
-     */
     fun observeDownloadedVideos(limit: Int = 100): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
             emit(getDownloadedVideos(limit, offset = 0))
         }
     }.flowOn(dispatcher)
 
-    /* -------------------------------------------------------------------------
-     * History API
-     * ------------------------------------------------------------------------- */
-
-    /**
-     * Gets listening history videos ordered by lastPlayedAt DESC.
-     */
     suspend fun getPlaybackHistory(limit: Int = 100, offset: Int = 0): List<Video> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         videoDao.getPlaybackHistory(db, limit, offset)
     }
 
-    /**
-     * Reactive Flow observing listening history videos.
-     */
     fun observePlaybackHistory(limit: Int = 100): Flow<List<Video>> = flow {
         videoInvalidationTrigger.collect {
             emit(getPlaybackHistory(limit, offset = 0))
         }
     }.flowOn(dispatcher)
 
-    /**
-     * Clears all playback history.
-     */
     suspend fun clearPlaybackHistory(): Boolean = withContext(dispatcher) {
         val success = mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -557,20 +411,13 @@ class DatabaseManager private constructor(private val appContext: Context) {
         success
     }
 
-    /* -------------------------------------------------------------------------
-     * Maintenance & Diagnostics
-     * ------------------------------------------------------------------------- */
-
-    /**
-     * Gathers high-level statistics about stored channels, videos, and database size.
-     */
     suspend fun getStats(): DatabaseStats = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
         val channels = channelDao.countFollowed(db)
         val videos = videoDao.countVideos(db)
         val continueCount = videoDao.getContinueListeningVideos(db, 100).size.toLong()
         val downloaded = videoDao.countDownloaded(db)
-        // SQLite DB files size (including WAL and SHM if present)
+
         val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
         val dbDir = dbFile.parentFile
         val dbFilesSize = if (dbDir != null && dbDir.exists()) {
@@ -580,7 +427,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
             if (dbFile.exists()) dbFile.length() else 0L
         }
 
-        // Locally downloaded files size
         var downloadedFilesSize = 0L
         val downloadsDir = File(appContext.filesDir, "downloads")
         if (downloadsDir.exists()) {
@@ -598,7 +444,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
             }
         }
 
-        // Cache directory size (Coil image cache and temporary files)
         var cacheDirFilesSize = 0L
         val cacheDir = appContext.cacheDir
         if (cacheDir != null && cacheDir.exists()) {
@@ -617,9 +462,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         )
     }
 
-    /**
-     * Clears all channels, videos, and search history tables, and wipes downloaded media files and caches.
-     */
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
     suspend fun clearAll(): Unit = withContext(dispatcher) {
         mutex.withLock {
@@ -640,7 +482,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
                     it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a") || it.name.endsWith(".webm") || it.name.endsWith(".opus"))
                 }?.forEach { it.delete() }
 
-                // Clear Coil image cache on disk and memory
                 val imageCache = appContext.cacheDir.resolve("image_cache")
                 if (imageCache.exists()) {
                     imageCache.deleteRecursively()
@@ -659,13 +500,11 @@ class DatabaseManager private constructor(private val appContext: Context) {
         notifyVideoChanged()
     }
 
-    /**
-     * Flushes WAL and exports the SQLite database file to the provided output stream.
-     */
     suspend fun exportDatabase(outputStream: OutputStream): Result<Unit> = withContext(dispatcher) {
         mutex.withLock {
             try {
                 val db = dbHelper.writableDatabase
+                // Flush WAL to base db file before copying
                 db.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { it.moveToFirst() }
 
                 val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
@@ -685,9 +524,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
         }
     }
 
-    /**
-     * Validates SQLite magic header, replaces database file, clears WAL/SHM, and reopens helper.
-     */
     suspend fun importDatabase(inputStream: InputStream): kotlin.Result<Unit> = withContext(dispatcher) {
         mutex.withLock {
             val tempFile = File(appContext.cacheDir, "reson_import_temp.db")
@@ -696,7 +532,7 @@ class DatabaseManager private constructor(private val appContext: Context) {
                     inputStream.copyTo(out)
                 }
 
-                // Verify SQLite 3 magic header ("SQLite format 3\000")
+                // Verify SQLite 3 header ("SQLite format 3\000")
                 val header = ByteArray(16)
                 FileInputStream(tempFile).use { it.read(header) }
                 val magic = String(header, Charsets.US_ASCII)
@@ -705,7 +541,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
                     return@withContext kotlin.Result.failure(IllegalArgumentException("Selected file is not a valid SQLite database"))
                 }
 
-                // Close existing database and replace files
                 dbHelper.close()
 
                 val dbFile = appContext.getDatabasePath(ResonDatabaseHelper.DATABASE_NAME)
@@ -718,7 +553,6 @@ class DatabaseManager private constructor(private val appContext: Context) {
                 tempFile.copyTo(dbFile, overwrite = true)
                 tempFile.delete()
 
-                // Re-open and verify schema
                 dbHelper = ResonDatabaseHelper(appContext)
                 val newDb = dbHelper.writableDatabase
                 newDb.rawQuery("SELECT 1", null).use { it.moveToFirst() }

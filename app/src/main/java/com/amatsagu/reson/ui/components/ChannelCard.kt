@@ -33,9 +33,6 @@ import coil.compose.AsyncImage
 import com.amatsagu.reson.R
 import com.amatsagu.reson.model.Channel
 
-/**
- * Circular channel avatar card for the horizontal swipeable carousel in the Channels tab.
- */
 @Composable
 fun ChannelAvatarCard(
     channel: Channel,
@@ -117,9 +114,6 @@ fun ChannelAvatarCard(
     }
 }
 
-/**
- * Filter chip/avatar representing "All Channels" in the horizontal carousel.
- */
 @Composable
 fun AllChannelsCard(
     isSelected: Boolean,

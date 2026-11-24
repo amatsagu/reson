@@ -12,10 +12,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/**
- * Linear progress bar with rounded ends and no thumb dot indicator.
- * Optimized with drawWithCache for 120 FPS hardware-accelerated rendering.
- */
 @Composable
 fun ResonProgressBar(
     progress: Float,

@@ -7,13 +7,9 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/**
- * Main application class for Reson.
- */
 class ResonApplication : Application(), ImageLoaderFactory {
 
     private val applicationScope = CoroutineScope(SupervisorJob() + com.amatsagu.reson.core.coroutines.ResonDispatchers.SingleWorker)
@@ -45,19 +41,15 @@ class ResonApplication : Application(), ImageLoaderFactory {
 
         val ytDlpManager = YtDlpManager.getInstance(this)
 
-        // Asynchronously initialize and update yt-dlp on app startup
-        // This keeps app launch fast (doesn't block main UI thread)
         applicationScope.launch {
             Log.i(TAG, "Initializing yt-dlp on app start...")
             val ready = ytDlpManager.initialize()
             if (ready) {
-                // Silently check if an update is available on start
                 Log.i(TAG, "Checking for yt-dlp updates on start...")
                 ytDlpManager.update()
             }
         }
 
-        // Schedule periodic background maintenance worker
         YtDlpUpdateWorker.enqueuePeriodicUpdate(this)
     }
 
