@@ -198,10 +198,10 @@ class YtDlpManager private constructor(private val appContext: Context) {
             val hours = seconds / 3600
             val minutes = (seconds % 3600) / 60
             val secs = seconds % 60
-            return when {
-                hours > 0 -> "${hours}h ${minutes}m"
-                minutes > 0 -> "${minutes}m"
-                else -> "${secs}s"
+            return if (hours > 0) {
+                String.format(Locale.US, "%d:%02d:%02d", hours, minutes, secs)
+            } else {
+                String.format(Locale.US, "%d:%02d", minutes, secs)
             }
         }
 
@@ -294,7 +294,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
 
         /**
          * Identifies whether a raw video entry from yt-dlp is a YouTube Short,
-         * checking url patterns, title/description tags, tags array, and duration <= 60 seconds.
+         * checking url patterns, title/description tags, tags array, and vertical aspect ratio (height > width).
          */
         fun isShortVideo(json: org.json.JSONObject): Boolean {
             val url = json.optCleanString("url")
@@ -324,17 +324,36 @@ class YtDlpManager private constructor(private val appContext: Context) {
                 }
             }
 
-            val duration = json.optInt("duration", 0)
-            return duration in 1..60
+            // Aspect ratio check: vertical content (height > width, or aspect_ratio < 1.0)
+            val width = json.optInt("width", 0)
+            val height = json.optInt("height", 0)
+            val aspectRatio = json.optDouble("aspect_ratio", 0.0)
+            if ((aspectRatio > 0.0 && aspectRatio < 1.0) || (width > 0 && height > width)) {
+                return true
+            }
+
+            val thumbnails = json.optJSONArray("thumbnails")
+            if (thumbnails != null) {
+                for (i in 0 until thumbnails.length()) {
+                    val tObj = thumbnails.optJSONObject(i) ?: continue
+                    val tw = tObj.optInt("width", 0)
+                    val th = tObj.optInt("height", 0)
+                    if (tw > 0 && th > tw) {
+                        return true
+                    }
+                }
+            }
+
+            return false
         }
 
         /**
-         * Checks if a domain Video object is a YouTube Short, locked, private, or livestream.
+         * Checks if a domain Video object is a YouTube Short, locked, private, or vertical format.
          */
         fun isShortVideo(video: Video): Boolean {
             return isShortVideoTitle(video.title) ||
                     video.webpageUrl.contains("/shorts/") ||
-                    (video.durationSeconds in 1..60) ||
+                    (video.aspectRatio > 0f && video.aspectRatio < 1.0f) ||
                     isLockedVideoTitle(video.title)
         }
 
@@ -1344,6 +1363,15 @@ class YtDlpManager private constructor(private val appContext: Context) {
                         val parsedChannelId = json.optCleanString("channel_id")
                         val webpageUrl = if (isDirectUrl) trimmed else "https://www.youtube.com/watch?v=$id"
 
+                        val width = json.optInt("width", 0)
+                        val height = json.optInt("height", 0)
+                        val rawAspectRatio = json.optDouble("aspect_ratio", 0.0)
+                        val aspectRatio = when {
+                            rawAspectRatio > 0.0 -> rawAspectRatio.toFloat()
+                            width > 0 && height > 0 -> width.toFloat() / height.toFloat()
+                            else -> 0f
+                        }
+
                         videos.add(
                             Video(
                                 id = id,
@@ -1356,6 +1384,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
                                 thumbnailUrl = thumb,
                                 webpageUrl = webpageUrl,
                                 channelId = parsedChannelId,
+                                aspectRatio = aspectRatio,
                             )
                         )
                     } catch (parseEx: Exception) {

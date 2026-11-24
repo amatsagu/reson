@@ -726,8 +726,8 @@ class DatabaseManager private constructor(private val appContext: Context) {
                 try {
                     newDb.execSQL("""
                         DELETE FROM videos 
-                        WHERE (duration_seconds BETWEEN 1 AND 60)
-                           OR (duration_seconds = 0 AND last_played_at = 0 AND is_downloaded = 0)
+                        WHERE (aspect_ratio > 0.0 AND aspect_ratio < 1.0)
+                           OR id = 'EKmQ-TwVLts'
                            OR webpage_url LIKE '%/shorts/%'
                            OR title LIKE '%#shorts%'
                            OR title LIKE '%#short%'

@@ -195,12 +195,21 @@ fun ContinueCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    val subtitle = remember(video.channelTitle, video.durationText, video.releaseDateText) {
+                    val formattedDuration = remember(video.durationSeconds, video.durationText, video.playbackDurationMs) {
+                        when {
+                            video.durationSeconds > 0 -> com.amatsagu.reson.YtDlpManager.formatDuration(video.durationSeconds)
+                            video.playbackDurationMs > 0L -> com.amatsagu.reson.YtDlpManager.formatDuration((video.playbackDurationMs / 1000L).toInt())
+                            video.durationText.isNotBlank() && video.durationText != "Unknown" -> video.durationText
+                            else -> ""
+                        }
+                    }
+
+                    val subtitle = remember(video.channelTitle, formattedDuration, video.releaseDateText) {
                         buildString {
                             append(video.channelTitle)
-                            if (video.durationText.isNotBlank()) {
+                            if (formattedDuration.isNotBlank()) {
                                 append(" · ")
-                                append(video.durationText)
+                                append(formattedDuration)
                             }
                             if (video.releaseDateText.isNotBlank()) {
                                 append(" · ")

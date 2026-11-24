@@ -105,22 +105,16 @@ fun VideoItem(
             )
 
             val duration = when {
-                (video.durationText.isNotBlank() && (video.durationText != "Unknown")) -> video.durationText
                 video.durationSeconds > 0 -> com.amatsagu.reson.YtDlpManager.formatDuration(video.durationSeconds)
                 video.playbackDurationMs > 0L -> com.amatsagu.reson.YtDlpManager.formatDuration((video.playbackDurationMs / 1000L).toInt())
+                video.durationText.isNotBlank() && video.durationText != "Unknown" -> video.durationText
                 else -> ""
-            }
-
-            val channelAndDuration = if (duration.isNotBlank()) {
-                "${video.channelTitle} · $duration"
-            } else {
-                video.channelTitle
             }
 
             Spacer(modifier = Modifier.height(3.dp))
 
             Text(
-                text = channelAndDuration,
+                text = video.channelTitle,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -128,9 +122,16 @@ fun VideoItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            if (video.releaseDateText.isNotBlank()) {
+            val durationAndReleaseDate = when {
+                duration.isNotBlank() && video.releaseDateText.isNotBlank() -> "$duration · ${video.releaseDateText}"
+                duration.isNotBlank() -> duration
+                video.releaseDateText.isNotBlank() -> video.releaseDateText
+                else -> ""
+            }
+
+            if (durationAndReleaseDate.isNotBlank()) {
                 Text(
-                    text = video.releaseDateText,
+                    text = durationAndReleaseDate,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

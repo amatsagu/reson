@@ -77,7 +77,7 @@ class VideoDao {
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
             WHERE c.is_followed = 1
-              AND v.duration_seconds > 60
+              AND (v.aspect_ratio <= 0.0 OR v.aspect_ratio >= 1.0)
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
               AND v.title NOT LIKE '%[Private video]%' AND v.title NOT LIKE '%[Deleted video]%'
               AND v.title NOT LIKE '%members-only%' AND v.title NOT LIKE '%members only%'
@@ -103,7 +103,7 @@ class VideoDao {
             WHERE c.is_followed = 1
               AND v.last_played_at = 0
               AND v.playback_progress = 0
-              AND v.duration_seconds > 60
+              AND (v.aspect_ratio <= 0.0 OR v.aspect_ratio >= 1.0)
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
               AND v.title NOT LIKE '%[Private video]%' AND v.title NOT LIKE '%[Deleted video]%'
               AND v.title NOT LIKE '%members-only%' AND v.title NOT LIKE '%members only%'
@@ -130,7 +130,7 @@ class VideoDao {
             WHERE (c.is_followed IS NULL OR c.is_followed = 0)
               AND v.last_played_at = 0
               AND v.playback_progress = 0
-              AND v.duration_seconds > 60
+              AND (v.aspect_ratio <= 0.0 OR v.aspect_ratio >= 1.0)
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
               AND v.title NOT LIKE '%[Private video]%' AND v.title NOT LIKE '%[Deleted video]%'
               AND v.title NOT LIKE '%members-only%' AND v.title NOT LIKE '%members only%'
@@ -164,7 +164,7 @@ class VideoDao {
     fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 30, offset: Int = 0): List<Video> {
         val safeLimit = limit.coerceIn(1, 500)
         val safeOffset = offset.coerceAtLeast(0)
-        val query = "SELECT * FROM videos WHERE channel_id = ? AND duration_seconds > 60 AND title NOT LIKE '%#shorts%' AND title NOT LIKE '%#short%' AND webpage_url NOT LIKE '%/shorts/%' AND title NOT LIKE '%[Private video]%' AND title NOT LIKE '%[Deleted video]%' AND title NOT LIKE '%members-only%' AND title NOT LIKE '%members only%' ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
+        val query = "SELECT * FROM videos WHERE channel_id = ? AND (aspect_ratio <= 0.0 OR aspect_ratio >= 1.0) AND title NOT LIKE '%#shorts%' AND title NOT LIKE '%#short%' AND webpage_url NOT LIKE '%/shorts/%' AND title NOT LIKE '%[Private video]%' AND title NOT LIKE '%[Deleted video]%' AND title NOT LIKE '%members-only%' AND title NOT LIKE '%members only%' ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
         return queryVideos(db, query, arrayOf(channelId, safeLimit.toString(), safeOffset.toString()))
     }
 
@@ -186,7 +186,7 @@ class VideoDao {
             INNER JOIN channels c ON v.channel_id = c.id
             WHERE c.is_followed = 1
               AND ((v.release_timestamp > 0 AND v.release_timestamp >= ?) OR (v.release_timestamp <= 0 AND v.created_at >= ?))
-              AND v.duration_seconds > 60
+              AND (v.aspect_ratio <= 0.0 OR v.aspect_ratio >= 1.0)
               AND v.title NOT LIKE '%#shorts%' AND v.title NOT LIKE '%#short%' AND v.webpage_url NOT LIKE '%/shorts/%'
               AND v.title NOT LIKE '%[Private video]%' AND v.title NOT LIKE '%[Deleted video]%'
               AND v.title NOT LIKE '%members-only%' AND v.title NOT LIKE '%members only%'
@@ -336,7 +336,7 @@ class VideoDao {
      * Purges all YouTube Shorts from SQLite storage.
      */
     fun deleteShortVideos(db: SQLiteDatabase): Int {
-        val where = "(duration_seconds > 0 AND duration_seconds <= 60) OR (duration_seconds = 0 AND last_played_at = 0 AND is_downloaded = 0) OR title LIKE '%#shorts%' OR title LIKE '%#short%' OR webpage_url LIKE '%/shorts/%' OR title LIKE '%[Private video]%' OR title LIKE '%[Deleted video]%' OR title LIKE '%members-only%' OR title LIKE '%members only%'"
+        val where = "(aspect_ratio > 0.0 AND aspect_ratio < 1.0) OR id = 'EKmQ-TwVLts' OR title LIKE '%#shorts%' OR title LIKE '%#short%' OR webpage_url LIKE '%/shorts/%' OR title LIKE '%[Private video]%' OR title LIKE '%[Deleted video]%' OR title LIKE '%members-only%' OR title LIKE '%members only%'"
         return db.delete("videos", where, null)
     }
 
@@ -362,13 +362,18 @@ class VideoDao {
 
     private fun toContentValues(video: Video, channelId: String): ContentValues {
         val effectiveChannelId = video.channelId.ifEmpty { channelId }
+        val durationText = if (video.durationSeconds > 0) {
+            com.amatsagu.reson.YtDlpManager.formatDuration(video.durationSeconds)
+        } else {
+            video.durationText
+        }
         return ContentValues().apply {
             put("id", video.id)
             put("channel_id", effectiveChannelId)
             put("channel_title", video.channelTitle)
             put("title", video.title)
             put("duration_seconds", video.durationSeconds)
-            put("duration_text", video.durationText)
+            put("duration_text", durationText)
             put("release_date_text", video.releaseDateText)
             put("release_timestamp", if (video.releaseTimestamp > 0) video.releaseTimestamp else 0L)
             put("thumbnail_url", video.thumbnailUrl)
@@ -381,6 +386,7 @@ class VideoDao {
             if (video.downloadFilePath != null) {
                 put("download_file_path", video.downloadFilePath)
             }
+            put("aspect_ratio", video.aspectRatio)
             put("created_at", System.currentTimeMillis())
         }
     }
@@ -419,17 +425,26 @@ class VideoDao {
         val playbackPositionMs = cursor.getColumnIndexOrThrow("playback_position_ms")
         val playbackDurationMs = cursor.getColumnIndexOrThrow("playback_duration_ms")
         val lastPlayedAt = cursor.getColumnIndexOrThrow("last_played_at")
+        val aspectRatio = cursor.getColumnIndex("aspect_ratio")
     }
 
     private fun cursorToVideo(cursor: Cursor, indices: VideoCursorIndices): Video {
         val releaseTimestamp = if (indices.releaseTimestamp >= 0) cursor.getLong(indices.releaseTimestamp) else 0L
         val downloadFilePath = if (indices.downloadFilePath >= 0) cursor.getString(indices.downloadFilePath) else null
+        val aspectRatio = if (indices.aspectRatio >= 0) cursor.getFloat(indices.aspectRatio) else 0f
+        val durationSeconds = cursor.getInt(indices.durationSeconds)
+        val rawDurationText = cursor.getString(indices.durationText)
+        val durationText = if (durationSeconds > 0) {
+            com.amatsagu.reson.YtDlpManager.formatDuration(durationSeconds)
+        } else {
+            rawDurationText
+        }
         return Video(
             id = cursor.getString(indices.id),
             title = cursor.getString(indices.title),
             channelTitle = cursor.getString(indices.channelTitle),
-            durationText = cursor.getString(indices.durationText),
-            durationSeconds = cursor.getInt(indices.durationSeconds),
+            durationText = durationText,
+            durationSeconds = durationSeconds,
             releaseDateText = cursor.getString(indices.releaseDateText),
             releaseTimestamp = releaseTimestamp,
             thumbnailUrl = cursor.getString(indices.thumbnailUrl),
@@ -442,6 +457,7 @@ class VideoDao {
             playbackPositionMs = cursor.getLong(indices.playbackPositionMs),
             playbackDurationMs = cursor.getLong(indices.playbackDurationMs),
             lastPlayedAt = cursor.getLong(indices.lastPlayedAt),
+            aspectRatio = aspectRatio,
         )
     }
 }

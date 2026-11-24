@@ -27,6 +27,7 @@ data class Video(
     val playbackPositionMs: Long = 0L,
     val playbackDurationMs: Long = 0L,
     val lastPlayedAt: Long = 0L,
+    val aspectRatio: Float = 0f,
 )
 
 /**

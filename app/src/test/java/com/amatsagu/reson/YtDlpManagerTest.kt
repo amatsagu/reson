@@ -324,29 +324,57 @@ class YtDlpManagerTest {
         val jsonShortUrl = org.json.JSONObject().put("title", "Cool Vid").put("webpage_url", "https://www.youtube.com/shorts/abc123xyz")
         assertTrue(YtDlpManager.isShortVideo(jsonShortUrl))
 
-        val jsonShortDuration = org.json.JSONObject().put("title", "Quick Vid").put("duration", 45)
-        assertTrue(YtDlpManager.isShortVideo(jsonShortDuration))
+        // Vertical video (aspect ratio < 1.0 or height > width) is identified as a Short
+        val jsonVertical = org.json.JSONObject().put("title", "AI Model").put("width", 720).put("height", 1280).put("aspect_ratio", 0.56)
+        assertTrue(YtDlpManager.isShortVideo(jsonVertical))
+
+        // Legitimate very short video in landscape format is NOT blocked by duration
+        val jsonShortLandscape = org.json.JSONObject().put("title", "Quick Sketch").put("duration", 45).put("width", 1920).put("height", 1080).put("aspect_ratio", 1.77)
+        assertFalse(YtDlpManager.isShortVideo(jsonShortLandscape))
 
         val jsonNormal = org.json.JSONObject().put("title", "Podcast Episode 1").put("duration", 3600).put("webpage_url", "https://www.youtube.com/watch?v=abc123xyz")
         assertFalse(YtDlpManager.isShortVideo(jsonNormal))
 
-        val videoShort = com.amatsagu.reson.model.Video(
+        // Domain video with vertical aspect ratio is flagged as Short
+        val videoVertical = com.amatsagu.reson.model.Video(
             id = "s1",
             title = "Quick tip",
             channelTitle = "Creator",
-            durationText = "45s",
-            durationSeconds = 45
+            durationText = "3:53",
+            durationSeconds = 233,
+            aspectRatio = 0.56f
         )
-        assertTrue(YtDlpManager.isShortVideo(videoShort))
+        assertTrue(YtDlpManager.isShortVideo(videoVertical))
+
+        // Domain video with short duration but landscape format is preserved
+        val videoShortLandscape = com.amatsagu.reson.model.Video(
+            id = "s2",
+            title = "Short Animation",
+            channelTitle = "Creator",
+            durationText = "0:45",
+            durationSeconds = 45,
+            aspectRatio = 1.77f
+        )
+        assertFalse(YtDlpManager.isShortVideo(videoShortLandscape))
 
         val videoLong = com.amatsagu.reson.model.Video(
             id = "l1",
             title = "Full Talk",
             channelTitle = "Creator",
-            durationText = "15m",
+            durationText = "15:00",
             durationSeconds = 900
         )
         assertFalse(YtDlpManager.isShortVideo(videoLong))
+    }
+
+    @Test
+    fun testFormatDuration_standardFormats() {
+        assertEquals("3:53", YtDlpManager.formatDuration(233))
+        assertEquals("0:45", YtDlpManager.formatDuration(45))
+        assertEquals("15:00", YtDlpManager.formatDuration(900))
+        assertEquals("1:01:05", YtDlpManager.formatDuration(3665))
+        assertEquals("", YtDlpManager.formatDuration(0))
+        assertEquals("", YtDlpManager.formatDuration(-1))
     }
 
     @Test

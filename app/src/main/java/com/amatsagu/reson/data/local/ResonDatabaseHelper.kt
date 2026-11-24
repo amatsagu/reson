@@ -31,6 +31,12 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
             db.execSQL("PRAGMA temp_store = MEMORY")
             // 3. 4 MB in-memory SQLite cache (-4000 KiB)
             db.execSQL("PRAGMA cache_size = -4000")
+            // Ensure schema migration columns exist
+            try {
+                db.execSQL("ALTER TABLE videos ADD COLUMN aspect_ratio REAL NOT NULL DEFAULT 0.0")
+            } catch (_: Exception) {
+                // Column already exists
+            }
             // Ensure all composite indexes exist
             createIndexes(db)
         } catch (e: Exception) {
@@ -79,6 +85,7 @@ class ResonDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 last_played_at INTEGER NOT NULL DEFAULT 0,
                 is_downloaded INTEGER NOT NULL DEFAULT 0,
                 download_file_path TEXT DEFAULT NULL,
+                aspect_ratio REAL NOT NULL DEFAULT 0.0,
                 created_at INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
