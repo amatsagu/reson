@@ -48,6 +48,7 @@ android {
 
     packaging {
         jniLibs {
+            // Required by youtubedl-android to extract libpython.zip.so and libffmpeg.zip.so to disk
             useLegacyPackaging = true
         }
     }
@@ -55,7 +56,6 @@ android {
 
 dependencies {
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
     implementation(libs.material)
 
     // Compose
