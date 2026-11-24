@@ -9,15 +9,18 @@
 }
 
 # -----------------------------------------------------------------------------
-# 2. youtubedl-android (Python runtime, FFmpeg & JNI binaries)
+# 2. youtubedl-android (Python runtime, FFmpeg, Apache Commons, Jackson)
 # -----------------------------------------------------------------------------
--keep class com.yausername.youtubedl_android.** { *; }
--keepclassmembers class com.yausername.youtubedl_android.** { *; }
--dontwarn com.yausername.youtubedl_android.**
+-keep class com.yausername.** { *; }
+-keepclassmembers class com.yausername.** { *; }
+-dontwarn com.yausername.**
 
--keep class com.yausername.ffmpeg.** { *; }
--keepclassmembers class com.yausername.ffmpeg.** { *; }
--dontwarn com.yausername.ffmpeg.**
+-keep class org.apache.commons.** { *; }
+-keepclassmembers class org.apache.commons.** { *; }
+-dontwarn org.apache.commons.**
+
+-keep class com.fasterxml.jackson.** { *; }
+-dontwarn com.fasterxml.jackson.**
 
 # -----------------------------------------------------------------------------
 # 3. Media3 ExoPlayer & MediaSessionService
