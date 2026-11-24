@@ -71,6 +71,8 @@ class VideoDao {
     }
 
     fun getFeedVideos(db: SQLiteDatabase, limit: Int = 30, offset: Int = 0): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = """
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
@@ -82,7 +84,7 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
     /**
@@ -93,6 +95,8 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0,
     ): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = """
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
@@ -106,7 +110,7 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
     /**
@@ -118,6 +122,8 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0
     ): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = """
             SELECT v.* FROM videos v
             LEFT JOIN channels c ON v.channel_id = c.id
@@ -138,10 +144,12 @@ class VideoDao {
               v.created_at DESC, v.release_timestamp DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
     fun getContinueListeningVideos(db: SQLiteDatabase, limit: Int = 10, offset: Int = 0): List<Video> {
+        val safeLimit = limit.coerceIn(1, 100)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = """
             SELECT * FROM videos
             WHERE last_played_at > 0 
@@ -150,12 +158,14 @@ class VideoDao {
             ORDER BY last_played_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
     fun getVideosForChannel(db: SQLiteDatabase, channelId: String, limit: Int = 30, offset: Int = 0): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = "SELECT * FROM videos WHERE channel_id = ? AND duration_seconds > 60 AND title NOT LIKE '%#shorts%' AND title NOT LIKE '%#short%' AND webpage_url NOT LIKE '%/shorts/%' AND title NOT LIKE '%[Private video]%' AND title NOT LIKE '%[Deleted video]%' AND title NOT LIKE '%members-only%' AND title NOT LIKE '%members only%' ORDER BY release_timestamp DESC, created_at DESC LIMIT ? OFFSET ?"
-        return queryVideos(db, query, arrayOf(channelId, limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(channelId, safeLimit.toString(), safeOffset.toString()))
     }
 
     /**
@@ -169,6 +179,8 @@ class VideoDao {
         limit: Int = 30,
         offset: Int = 0,
     ): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = """
             SELECT v.* FROM videos v
             INNER JOIN channels c ON v.channel_id = c.id
@@ -181,17 +193,21 @@ class VideoDao {
             ORDER BY v.release_timestamp DESC, v.created_at DESC
             LIMIT ? OFFSET ?
         """.trimIndent()
-        return queryVideos(db, query, arrayOf(minTimestampSec.toString(), minCreatedAtMs.toString(), limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(minTimestampSec.toString(), minCreatedAtMs.toString(), safeLimit.toString(), safeOffset.toString()))
     }
 
     fun getDownloadedVideos(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = "SELECT * FROM videos WHERE is_downloaded = 1 ORDER BY last_played_at DESC, created_at DESC LIMIT ? OFFSET ?"
-        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
     fun getPlaybackHistory(db: SQLiteDatabase, limit: Int = 100, offset: Int = 0): List<Video> {
+        val safeLimit = limit.coerceIn(1, 500)
+        val safeOffset = offset.coerceAtLeast(0)
         val query = "SELECT * FROM videos WHERE last_played_at > 0 ORDER BY last_played_at DESC LIMIT ? OFFSET ?"
-        return queryVideos(db, query, arrayOf(limit.toString(), offset.toString()))
+        return queryVideos(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
     fun clearPlaybackHistory(db: SQLiteDatabase): Boolean {
@@ -227,6 +243,7 @@ class VideoDao {
      * on the oldest records beyond the limit.
      */
     fun trimListeningHistory(db: SQLiteDatabase, maxRecords: Int = 100) {
+        val safeMax = maxRecords.coerceIn(10, 1000)
         val query = """
             UPDATE videos
             SET last_played_at = 0, playback_position_ms = 0, playback_progress = 0.0
@@ -237,7 +254,7 @@ class VideoDao {
                 LIMIT ?
             )
         """.trimIndent()
-        db.execSQL(query, arrayOf(maxRecords.toString()))
+        db.execSQL(query, arrayOf(safeMax.toString()))
     }
 
     /**
@@ -251,6 +268,7 @@ class VideoDao {
      * 6. ONLY removes excess unplayed discovery items if the unplayed pool exceeds [maxDiscoveryCount] (default 600)
      */
     fun pruneOldDiscoveryVideos(db: SQLiteDatabase, maxDiscoveryCount: Int = 600) {
+        val safeMaxDiscovery = maxDiscoveryCount.coerceIn(50, 2000)
         val countQuery = """
             SELECT COUNT(*) FROM videos v
             WHERE v.is_downloaded = 0
@@ -270,9 +288,9 @@ class VideoDao {
         }
 
         // If within safety quota, do not delete anything
-        if (totalUnplayedDiscovery <= maxDiscoveryCount) return
+        if (totalUnplayedDiscovery <= safeMaxDiscovery) return
 
-        val toDeleteCount = totalUnplayedDiscovery - maxDiscoveryCount
+        val toDeleteCount = totalUnplayedDiscovery - safeMaxDiscovery
         val deleteQuery = """
             DELETE FROM videos
             WHERE id IN (

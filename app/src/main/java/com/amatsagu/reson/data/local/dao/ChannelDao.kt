@@ -61,14 +61,18 @@ class ChannelDao {
         return affected > 0
     }
 
-    fun getFollowedChannels(db: SQLiteDatabase): List<Channel> {
-        val query = "SELECT * FROM channels WHERE is_followed = 1 ORDER BY followed_at DESC"
-        return queryChannels(db, query)
+    fun getFollowedChannels(db: SQLiteDatabase, limit: Int = 500, offset: Int = 0): List<Channel> {
+        val safeLimit = limit.coerceIn(1, 1000)
+        val safeOffset = offset.coerceAtLeast(0)
+        val query = "SELECT * FROM channels WHERE is_followed = 1 ORDER BY followed_at DESC LIMIT ? OFFSET ?"
+        return queryChannels(db, query, arrayOf(safeLimit.toString(), safeOffset.toString()))
     }
 
-    fun getFollowedChannelIds(db: SQLiteDatabase): Set<String> {
+    fun getFollowedChannelIds(db: SQLiteDatabase, limit: Int = 2000): Set<String> {
+        val safeLimit = limit.coerceIn(1, 5000)
         val ids = mutableSetOf<String>()
-        db.rawQuery("SELECT id FROM channels WHERE is_followed = 1", null).use { cursor ->
+        val query = "SELECT id FROM channels WHERE is_followed = 1 LIMIT ?"
+        db.rawQuery(query, arrayOf(safeLimit.toString())).use { cursor ->
             while (cursor.moveToNext()) {
                 ids.add(cursor.getString(0))
             }

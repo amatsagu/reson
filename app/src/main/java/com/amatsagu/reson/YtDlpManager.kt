@@ -725,6 +725,7 @@ class YtDlpManager private constructor(private val appContext: Context) {
         return try {
             deferred.await()
         } catch (e: kotlinx.coroutines.CancellationException) {
+            priorityQueue.remove(task)
             deferred.cancel(e)
             throw e
         }

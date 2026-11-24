@@ -90,9 +90,9 @@ class DatabaseManager private constructor(private val appContext: Context) {
     /**
      * Returns a snapshot of all currently followed channels sorted by follow time.
      */
-    suspend fun getFollowedChannels(): List<Channel> = withContext(dispatcher) {
+    suspend fun getFollowedChannels(limit: Int = 500, offset: Int = 0): List<Channel> = withContext(dispatcher) {
         val db = dbHelper.readableDatabase
-        channelDao.getFollowedChannels(db)
+        channelDao.getFollowedChannels(db, limit, offset)
     }
 
     /**
@@ -598,7 +598,14 @@ class DatabaseManager private constructor(private val appContext: Context) {
             }
         }
 
-        val totalCacheSize = dbFilesSize + downloadedFilesSize
+        // Cache directory size (Coil image cache and temporary files)
+        var cacheDirFilesSize = 0L
+        val cacheDir = appContext.cacheDir
+        if (cacheDir != null && cacheDir.exists()) {
+            cacheDirFilesSize += cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+
+        val totalCacheSize = dbFilesSize + downloadedFilesSize + cacheDirFilesSize
 
         DatabaseStats(
             followedChannelCount = channels,
@@ -611,8 +618,9 @@ class DatabaseManager private constructor(private val appContext: Context) {
     }
 
     /**
-     * Clears all channels, videos, and search history tables, and wipes downloaded media files.
+     * Clears all channels, videos, and search history tables, and wipes downloaded media files and caches.
      */
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
     suspend fun clearAll(): Unit = withContext(dispatcher) {
         mutex.withLock {
             val db = dbHelper.writableDatabase
@@ -631,8 +639,20 @@ class DatabaseManager private constructor(private val appContext: Context) {
                 appContext.filesDir.listFiles()?.filter {
                     it.isFile && (it.name.startsWith("offline_") || it.name.endsWith(".mp3") || it.name.endsWith(".m4a") || it.name.endsWith(".webm") || it.name.endsWith(".opus"))
                 }?.forEach { it.delete() }
+
+                // Clear Coil image cache on disk and memory
+                val imageCache = appContext.cacheDir.resolve("image_cache")
+                if (imageCache.exists()) {
+                    imageCache.deleteRecursively()
+                }
+                try {
+                    coil.Coil.imageLoader(appContext).memoryCache?.clear()
+                    coil.Coil.imageLoader(appContext).diskCache?.clear()
+                } catch (ce: Throwable) {
+                    Log.d("DatabaseManager", "Coil cache clear: ${ce.message}")
+                }
             } catch (e: Exception) {
-                Log.w("DatabaseManager", "Failed to clear media files: ${e.message}")
+                Log.w("DatabaseManager", "Failed to clear media/cache files: ${e.message}")
             }
         }
         notifyChannelChanged()
