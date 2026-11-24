@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#131F2A" />
+      <stop offset="100%" stop-color="#091016" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded canvas -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Rhythm Sparkle -->
+  <path d="M 420 113 Q 435 113 435 87 Q 435 113 451 113 Q 435 113 435 138 Z" fill="#38D39F" />
+
+  <!-- Headphone Arch Band -->
+  <path d="M 133 184 C 133 46 379 46 379 184" fill="none" stroke="#38D39F" stroke-width="28" stroke-linecap="round" />
+
+  <!-- R Mascot Body -->
+  <!-- Left Stem -->
+  <rect x="113" y="113" width="82" height="318" rx="41" fill="#FFB088" />
+
+  <!-- Upper Bowl (Face Head) -->
+  <path d="M 154 113 L 256 113 C 389 113 389 266 256 266 L 154 266 Z" fill="#FFB088" />
+
+  <!-- Kicking / Tapping Leg -->
+  <path d="M 205 246 L 348 389 C 379 420 420 410 399 369 L 266 236 Z" fill="#FFB088" />
+
+  <!-- Foot Tap Wave -->
+  <path d="M 405 358 A 41 41 0 0 1 405 415" fill="none" stroke="#38D39F" stroke-width="11" stroke-linecap="round" />
+
+  <!-- Facial Features -->
+  <!-- Closed Smiling Eyes (◠ ‿ ◠) -->
+  <path d="M 205 179 Q 225 154 246 179" fill="none" stroke="#4A2818" stroke-width="12" stroke-linecap="round" />
+  <path d="M 287 179 Q 307 154 328 179" fill="none" stroke="#4A2818" stroke-width="12" stroke-linecap="round" />
+
+  <!-- Sweet Smile -->
+  <path d="M 251 210 Q 266 230 282 210" fill="none" stroke="#4A2818" stroke-width="10" stroke-linecap="round" />
+
+  <!-- Rosy Blush Cheeks -->
+  <circle cx="189" cy="205" r="18" fill="#FF6584" opacity="0.55" />
+  <circle cx="343" cy="205" r="18" fill="#FF6584" opacity="0.55" />
+
+  <!-- Headphone Cushions -->
+  <rect x="102" y="138" width="46" height="92" rx="23" fill="#38D39F" />
+  <rect x="364" y="138" width="46" height="92" rx="23" fill="#38D39F" />
+</svg>

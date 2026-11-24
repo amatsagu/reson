@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="cloudBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1E162B" />
+      <stop offset="100%" stop-color="#0F0B17" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#cloudBg)" />
+
+  <!-- Floating Resonance Bubbles -->
+  <circle cx="410" cy="102" r="20" fill="#FFD166" opacity="0.4" />
+  <circle cx="440" cy="154" r="13" fill="#E9D5FF" opacity="0.3" />
+
+  <!-- 8-degree relaxed tilt -->
+  <g transform="rotate(8 256 256)">
+    <!-- Headphone Band -->
+    <path d="M 133 184 C 133 46 379 46 379 184" fill="none" stroke="#FFD166" stroke-width="28" stroke-linecap="round" />
+
+    <!-- Cloud R Body -->
+    <rect x="113" y="113" width="82" height="307" rx="41" fill="#E9D5FF" />
+    <path d="M 154 113 L 256 113 C 379 113 379 266 256 266 L 154 266 Z" fill="#E9D5FF" />
+    <path d="M 215 246 C 282 287 338 348 379 410 L 307 430 C 266 379 225 317 184 266 Z" fill="#E9D5FF" />
+
+    <!-- Sleepy Smiling Face (˘ ▾ ˘) -->
+    <path d="M 200 179 Q 220 159 241 179" fill="none" stroke="#3B1D54" stroke-width="12" stroke-linecap="round" />
+    <path d="M 282 179 Q 302 159 323 179" fill="none" stroke="#3B1D54" stroke-width="12" stroke-linecap="round" />
+    <path d="M 251 215 Q 261 230 271 215" fill="none" stroke="#3B1D54" stroke-width="10" stroke-linecap="round" />
+
+    <!-- Blush -->
+    <circle cx="184" cy="205" r="18" fill="#FF85A1" opacity="0.5" />
+    <circle cx="338" cy="205" r="18" fill="#FF85A1" opacity="0.5" />
+
+    <!-- Cushions -->
+    <rect x="102" y="143" width="46" height="87" rx="23" fill="#FFD166" />
+    <rect x="364" y="143" width="46" height="87" rx="23" fill="#FFD166" />
+  </g>
+</svg>

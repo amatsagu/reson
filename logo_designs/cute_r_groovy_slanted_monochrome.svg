@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <mask id="groovyMask">
+      <rect width="512" height="512" fill="#FFFFFF" />
+      <g transform="rotate(-10 256 256)">
+        <line x1="205" y1="179" x2="246" y2="179" stroke="#000000" stroke-width="14" stroke-linecap="round" />
+        <path d="M 287 184 Q 307 159 328 184" fill="none" stroke="#000000" stroke-width="14" stroke-linecap="round" />
+        <path d="M 236 215 Q 266 236 297 215" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round" />
+        <rect x="97" y="133" width="56" height="102" rx="28" fill="none" stroke="#000000" stroke-width="8" />
+        <rect x="359" y="133" width="56" height="102" rx="28" fill="none" stroke="#000000" stroke-width="8" />
+      </g>
+    </mask>
+  </defs>
+
+  <g mask="url(#groovyMask)">
+    <g transform="rotate(-10 256 256)">
+      <path d="M 133 184 C 133 46 379 46 379 184" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" />
+      <rect x="113" y="113" width="82" height="318" rx="41" fill="#FFFFFF" />
+      <path d="M 154 113 L 266 113 C 389 113 389 266 266 266 L 154 266 Z" fill="#FFFFFF" />
+      <path d="M 225 246 L 384 384 L 317 420 L 179 282 Z" fill="#FFFFFF" />
+      <rect x="102" y="138" width="46" height="92" rx="23" fill="#FFFFFF" />
+      <rect x="364" y="138" width="46" height="92" rx="23" fill="#FFFFFF" />
+    </g>
+  </g>
+</svg>

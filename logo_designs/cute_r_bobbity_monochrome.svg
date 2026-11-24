@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <mask id="cutoutMask">
+      <!-- White base reveals everything -->
+      <rect width="512" height="512" fill="#FFFFFF" />
+
+      <!-- Black cuts out eyes, mouth, cushion separator -->
+      <path d="M 205 179 Q 225 154 246 179" fill="none" stroke="#000000" stroke-width="14" stroke-linecap="round" />
+      <path d="M 287 179 Q 307 154 328 179" fill="none" stroke="#000000" stroke-width="14" stroke-linecap="round" />
+      <path d="M 251 210 Q 266 230 282 210" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round" />
+
+      <!-- Negative space outline around earpads -->
+      <rect x="97" y="133" width="56" height="102" rx="28" fill="none" stroke="#000000" stroke-width="8" />
+      <rect x="359" y="133" width="56" height="102" rx="28" fill="none" stroke="#000000" stroke-width="8" />
+    </mask>
+  </defs>
+
+  <g mask="url(#cutoutMask)">
+    <!-- Headphone Arch Band -->
+    <path d="M 133 184 C 133 46 379 46 379 184" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" />
+
+    <!-- R Mascot Body -->
+    <rect x="113" y="113" width="82" height="318" rx="41" fill="#FFFFFF" />
+    <path d="M 154 113 L 256 113 C 389 113 389 266 256 266 L 154 266 Z" fill="#FFFFFF" />
+    <path d="M 205 246 L 348 389 C 379 420 420 410 399 369 L 266 236 Z" fill="#FFFFFF" />
+
+    <!-- Headphone Cushions -->
+    <rect x="102" y="138" width="46" height="92" rx="23" fill="#FFFFFF" />
+    <rect x="364" y="138" width="46" height="92" rx="23" fill="#FFFFFF" />
+
+    <!-- Foot tap wave -->
+    <path d="M 405 358 A 41 41 0 0 1 405 415" fill="none" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" opacity="0.6" />
+  </g>
+</svg>

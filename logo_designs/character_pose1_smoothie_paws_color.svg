@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="pose1Bg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#16233B"/>
+      <stop offset="100%" stop-color="#0D1424"/>
+    </linearGradient>
+    <linearGradient id="tealBand" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2DD4BF"/>
+      <stop offset="100%" stop-color="#38D39F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Canvas -->
+  <rect width="512" height="512" rx="120" fill="url(#pose1Bg)"/>
+
+  <!-- Seated Body Torso -->
+  <path d="M 143,282 C 102,369 112,481 179,481 L 333,481 C 400,481 410,369 369,282 Z" fill="#E5A65E"/>
+  <!-- White Chest Fur -->
+  <path d="M 205,297 C 179,384 333,384 307,297 Z" fill="#FFF7ED"/>
+
+  <!-- Headphone Arch Band -->
+  <path d="M 102,184 C 112,41 389,41 410,184" fill="none" stroke="url(#tealBand)" stroke-width="28" stroke-linecap="round"/>
+
+  <!-- Ears (Perky with Pink Centers) -->
+  <path d="M 133,123 C 92,51 154,31 184,92 Z" fill="#E5A65E"/>
+  <circle cx="143" cy="87" r="20" fill="#FFB4A2"/>
+  <path d="M 328,92 C 358,31 420,51 379,123 Z" fill="#E5A65E"/>
+  <circle cx="369" cy="87" r="20" fill="#FFB4A2"/>
+
+  <!-- Main Head -->
+  <circle cx="256" cy="194" r="123" fill="#E5A65E"/>
+
+  <!-- White Muzzle -->
+  <ellipse cx="256" cy="256" rx="82" ry="61" fill="#FFF7ED"/>
+
+  <!-- Nose -->
+  <circle cx="256" cy="225" r="18" fill="#382312"/>
+
+  <!-- Smile & Tongue -->
+  <path d="M 225,246 Q 256,287 287,246 Z" fill="#382312"/>
+  <path d="M 241,261 Q 256,292 271,261 Z" fill="#FF6B81"/>
+
+  <!-- Closed Joyful Eyes (◠ ‿ ◠) -->
+  <path d="M 179,184 Q 200,159 220,184" fill="none" stroke="#382312" stroke-width="12" stroke-linecap="round"/>
+  <path d="M 292,184 Q 312,159 333,184" fill="none" stroke="#382312" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Cheeks -->
+  <circle cx="159" cy="215" r="20" fill="#FF8577" opacity="0.5"/>
+  <circle cx="353" cy="215" r="20" fill="#FF8577" opacity="0.5"/>
+
+  <!-- Headphone Ear Cushions -->
+  <rect x="87" y="148" width="46" height="102" rx="23" fill="#2DD4BF"/>
+  <rect x="379" y="148" width="46" height="102" rx="23" fill="#2DD4BF"/>
+
+  <!-- Straw to Mouth -->
+  <path d="M 256,251 L 241,292 L 241,384" fill="none" stroke="#FFD166" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Iced Smoothie Cup (Held in center) -->
+  <polygon points="194,333 318,333 302,461 210,461" fill="#FF6B6B"/>
+  <rect x="184" y="323" width="144" height="23" rx="10" fill="#E2E8F0"/>
+  <!-- Lemon Slice on Rim -->
+  <circle cx="200" cy="328" r="23" fill="#FFEB3B"/>
+  <circle cx="200" cy="328" r="14" fill="#FFF9C4"/>
+
+  <!-- Left Paw Hugging Cup -->
+  <circle cx="184" cy="369" r="33" fill="#FFF7ED"/>
+  <circle cx="194" cy="353" r="6" fill="#382312"/>
+  <circle cx="200" cy="369" r="7" fill="#382312"/>
+  <circle cx="194" cy="384" r="6" fill="#382312"/>
+
+  <!-- Right Paw Hugging Cup -->
+  <circle cx="328" cy="369" r="33" fill="#FFF7ED"/>
+  <circle cx="318" cy="353" r="6" fill="#382312"/>
+  <circle cx="312" cy="369" r="7" fill="#382312"/>
+  <circle cx="318" cy="384" r="6" fill="#382312"/>
+</svg>

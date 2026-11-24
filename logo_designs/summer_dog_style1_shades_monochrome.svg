@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Monochrome SVG for Android 13+ Themed Icons and Android 12+ Status Bar Notifications -->
+  <!-- Headphone Arch Band -->
+  <path d="M 112,225 C 112,61 400,61 400,225" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round"/>
+
+  <!-- Floppy Pup Ears -->
+  <path d="M 143,133 C 72,133 82,266 133,256 Z" fill="#FFFFFF"/>
+  <path d="M 369,133 C 440,133 430,266 379,256 Z" fill="#FFFFFF"/>
+
+  <!-- Main Head -->
+  <circle cx="256" cy="235" r="128" fill="#FFFFFF"/>
+
+  <!-- Cutout Snout -->
+  <ellipse cx="256" cy="276" rx="77" ry="66" fill="#000000"/>
+
+  <!-- Cute Nose inside cutout -->
+  <circle cx="256" cy="266" r="20" fill="#FFFFFF"/>
+
+  <!-- Cutout Sunglasses -->
+  <rect x="138" y="179" width="102" height="72" rx="20" fill="#000000"/>
+  <rect x="271" y="179" width="102" height="72" rx="20" fill="#000000"/>
+  <rect x="230" y="194" width="52" height="20" rx="10" fill="#000000"/>
+
+  <!-- Headphone Ear Cushions with negative space outline -->
+  <rect x="82" y="179" width="62" height="112" rx="31" fill="#000000"/>
+  <rect x="87" y="184" width="52" height="102" rx="26" fill="#FFFFFF"/>
+  <rect x="368" y="179" width="62" height="112" rx="31" fill="#000000"/>
+  <rect x="373" y="184" width="52" height="102" rx="26" fill="#FFFFFF"/>
+
+  <!-- Iced Cup with Straw Silhouette -->
+  <line x1="410" y1="317" x2="384" y2="348" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round"/>
+  <polygon points="343,358 435,358 420,481 358,481" fill="#000000"/>
+  <polygon points="343,358 435,358 420,481 358,481" fill="none" stroke="#FFFFFF" stroke-width="15"/>
+</svg>

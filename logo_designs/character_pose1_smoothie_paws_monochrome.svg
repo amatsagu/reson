@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Monochrome SVG with clear cutouts for Android Notification and Themed Icons -->
+  <!-- Seated Body Torso -->
+  <path d="M 143,282 C 102,369 112,481 179,481 L 333,481 C 400,481 410,369 369,282 Z" fill="#FFFFFF"/>
+
+  <!-- Headphone Arch Band -->
+  <path d="M 102,184 C 112,41 389,41 410,184" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round"/>
+
+  <!-- Ears -->
+  <path d="M 133,123 C 92,51 154,31 184,92 Z" fill="#FFFFFF"/>
+  <path d="M 328,92 C 358,31 420,51 379,123 Z" fill="#FFFFFF"/>
+
+  <!-- Main Head -->
+  <circle cx="256" cy="194" r="123" fill="#FFFFFF"/>
+
+  <!-- Muzzle Cutout -->
+  <ellipse cx="256" cy="256" rx="82" ry="61" fill="#000000"/>
+
+  <!-- Nose -->
+  <circle cx="256" cy="225" r="18" fill="#FFFFFF"/>
+
+  <!-- Eyes in Cutout -->
+  <path d="M 179,184 Q 200,159 220,184" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round"/>
+  <path d="M 292,184 Q 312,159 333,184" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Headphone Ear Cushions with negative space outline -->
+  <rect x="82" y="143" width="56" height="112" rx="28" fill="#000000"/>
+  <rect x="87" y="148" width="46" height="102" rx="23" fill="#FFFFFF"/>
+  <rect x="374" y="143" width="56" height="112" rx="28" fill="#000000"/>
+  <rect x="379" y="148" width="46" height="102" rx="23" fill="#FFFFFF"/>
+
+  <!-- Straw -->
+  <path d="M 256,251 L 241,292 L 241,384" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round"/>
+
+  <!-- Cup Cutout & Outline -->
+  <polygon points="194,333 318,333 302,461 210,461" fill="#000000"/>
+  <polygon points="194,333 318,333 302,461 210,461" fill="none" stroke="#FFFFFF" stroke-width="14"/>
+
+  <!-- Left Paw with negative separation -->
+  <circle cx="184" cy="369" r="41" fill="#000000"/>
+  <circle cx="184" cy="369" r="33" fill="#FFFFFF"/>
+  <circle cx="194" cy="353" r="6" fill="#000000"/>
+  <circle cx="200" cy="369" r="7" fill="#000000"/>
+  <circle cx="194" cy="384" r="6" fill="#000000"/>
+
+  <!-- Right Paw with negative separation -->
+  <circle cx="328" cy="369" r="41" fill="#000000"/>
+  <circle cx="328" cy="369" r="33" fill="#FFFFFF"/>
+  <circle cx="318" cy="353" r="6" fill="#000000"/>
+  <circle cx="312" cy="369" r="7" fill="#000000"/>
+  <circle cx="318" cy="384" r="6" fill="#000000"/>
+</svg>

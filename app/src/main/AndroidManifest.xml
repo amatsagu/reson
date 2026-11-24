@@ -39,6 +39,9 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
+            <meta-data
+                android:name="androidx.media3.session.notification.small_icon"
+                android:resource="@drawable/ic_notification" />
         </service>
 
     </application>

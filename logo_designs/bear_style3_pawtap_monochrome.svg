@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Standalone monochrome SVG with clean negative space cutouts for Android Notification & Material You Theme -->
+  <!-- Sound Ripple Arc -->
+  <path d="M 404,235 A 82,92 0 0,1 404,327" fill="none" stroke="#FFFFFF" stroke-width="12" stroke-linecap="round" opacity="0.7"/>
+
+  <!-- Headphone Arch Band -->
+  <path d="M 112,266 C 112,87 400,87 400,266" fill="none" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round"/>
+
+  <!-- Bear Ears -->
+  <circle cx="174" cy="179" r="38" fill="#FFFFFF"/>
+  <circle cx="338" cy="179" r="38" fill="#FFFFFF"/>
+
+  <!-- Bear Head -->
+  <rect x="143" y="179" width="226" height="230" rx="92" fill="#FFFFFF"/>
+
+  <!-- Right Ear Cushion -->
+  <rect x="368" y="225" width="52" height="112" rx="26" fill="#FFFFFF"/>
+
+  <!-- Left Ear Cushion -->
+  <rect x="92" y="225" width="52" height="112" rx="26" fill="#FFFFFF"/>
+
+  <!-- Closed Eyes (◠ ‿ ◠) (Negative cutout slits) -->
+  <path d="M 189,251 Q 210,230 230,251" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round"/>
+  <path d="M 282,251 Q 302,230 323,251" fill="none" stroke="#000000" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- Cute Nose (Negative Cutout) -->
+  <circle cx="256" cy="292" r="18" fill="#000000"/>
+
+  <!-- Left Paw Pressing Earcup (Separation cutout & white paw) -->
+  <circle cx="118" cy="297" r="44" fill="#000000"/>
+  <circle cx="118" cy="297" r="33" fill="#FFFFFF"/>
+  <!-- Paw Beans -->
+  <circle cx="102" cy="282" r="6" fill="#000000"/>
+  <circle cx="118" cy="276" r="7" fill="#000000"/>
+  <circle cx="133" cy="282" r="6" fill="#000000"/>
+</svg>

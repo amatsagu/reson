@@ -6,8 +6,10 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- Include Room / SQLite databases and app preferences -->
+    <include domain="database" path="." />
+    <include domain="sharedpref" path="." />
+
+    <!-- Exclude internal youtubedl-android library preferences -->
+    <exclude domain="sharedpref" path="youtubedl-android.xml" />
 </full-backup-content>

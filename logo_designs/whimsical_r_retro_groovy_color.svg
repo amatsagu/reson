@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="groovyBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1C1024" />
+      <stop offset="100%" stop-color="#0D0612" />
+    </linearGradient>
+    <linearGradient id="groovyR" x1="20%" y1="15%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#FFA726" />
+      <stop offset="100%" stop-color="#FF5722" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#groovyBg)" />
+
+  <!-- Retro Sparkle -->
+  <path d="M 430 123 Q 445 123 445 97 Q 445 123 461 123 Q 445 123 445 148 Z" fill="#FFD54F" />
+
+  <!-- Groovy 70s Swash Letterform -->
+  <path fill-rule="evenodd" fill="url(#groovyR)" d="
+    M 92 102
+    C 123 102, 143 113, 154 133
+    L 276 92
+    C 430 92, 440 266, 297 276
+    C 328 297, 369 328, 420 389
+    C 451 420, 461 440, 440 451
+    C 410 461, 369 430, 328 389
+    L 225 287
+    L 225 389
+    C 225 420, 246 440, 266 440
+    L 102 440
+    C 123 440, 143 420, 143 389
+    L 143 143
+    C 143 113, 113 102, 92 102
+    Z
+    M 225 164
+    L 276 164
+    C 348 164, 348 225, 276 225
+    L 225 225
+    Z" />
+</svg>
