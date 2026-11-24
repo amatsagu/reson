@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
-  <!-- Standalone Monochrome for Android 13+ Themed Icons and Notification Small Icon -->
-  <rect x="128" y="102" width="62" height="308" rx="31" fill="#FFFFFF"/>
-  <path d="M 158,133 A 87,87 0 0,1 158,307" fill="none" stroke="#FFFFFF" stroke-width="56" stroke-linecap="round"/>
-  <line x1="225" y1="266" x2="368" y2="410" stroke="#FFFFFF" stroke-width="56" stroke-linecap="round"/>
-  <path d="M 394,158 A 118,118 0 0,1 394,354" fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" opacity="0.5"/>
-</svg>
